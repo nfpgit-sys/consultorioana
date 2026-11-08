@@ -89,6 +89,4 @@ export function getAuthConfig(): AuthConfig {
   return { mode: "sin-configurar" };
 }
 
-export const APP_TIME_ZONE = "America/Argentina/Buenos_Aires";
-export const APP_LOCALE = "es-AR";
-export const APP_CURRENCY = "ARS";
+export { APP_CURRENCY, APP_LOCALE, APP_TIME_ZONE } from "./constants";

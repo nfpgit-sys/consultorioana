@@ -241,3 +241,24 @@ export const COMMON_PRESENTATIONS = [
   "ampolla",
   "pack",
 ];
+
+/** Plural simple en español para nombres de presentación ("caja" -> "cajas", "blíster" -> "blísteres"). */
+export function pluralizeEs(word: string, quantity = 2): string {
+  const w = word.trim();
+  if (!w || Math.abs(quantity) === 1) return w;
+  const lower = w.toLowerCase();
+  if (/[aeiouáéó]$/.test(lower)) return `${w}s`;
+  if (/[íú]$/.test(lower)) return `${w}es`;
+  if (/z$/.test(lower)) return `${w.slice(0, -1)}ces`;
+  if (/[sx]$/.test(lower)) return w;
+  if (["pack", "kit", "set"].includes(lower)) return `${w}s`;
+  if (/[^aeiou]$/.test(lower)) return `${w}es`;
+  return `${w}s`;
+}
+
+/** Etiqueta de una cantidad expresada en una unidad o presentación: "3 cajas", "1 caja", "2,5 g". */
+export function quantityUnitLabel(quantity: number, unit: string): string {
+  const physical = resolvePhysicalUnit(unit);
+  if (physical) return unitLabel(physical, quantity);
+  return pluralizeEs(unit, quantity);
+}

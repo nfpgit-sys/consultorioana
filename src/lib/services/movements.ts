@@ -527,7 +527,11 @@ export async function listMovements(q: Queryable, filters: MovementFilters = {})
   if (filters.to) add("m.effective_date <= ?::date", filters.to);
   if (filters.category) add("p.category = ?", filters.category);
   if (filters.operationId && uuid.safeParse(filters.operationId).success) add("m.operation_id = ?", filters.operationId);
-  if (filters.purchaseId && uuid.safeParse(filters.purchaseId).success) add("m.purchase_id = ?", filters.purchaseId);
+  if (filters.purchaseId && uuid.safeParse(filters.purchaseId).success) {
+    // Incluye las reversiones de movimientos de la compra (anulación).
+    params.push(filters.purchaseId);
+    where.push(`(m.purchase_id = $${params.length} or o.purchase_id = $${params.length})`);
+  }
   const whereSql = where.length ? `where ${where.join(" and ")}` : "";
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 500);
   const offset = Math.max(filters.offset ?? 0, 0);
@@ -548,7 +552,8 @@ export async function listMovements(q: Queryable, filters: MovementFilters = {})
     params,
   );
   const [{ total }] = await q.query<{ total: number }>(
-    `select count(*)::int as total from stock_movements m join products p on p.id = m.product_id ${whereSql}`,
+    `select count(*)::int as total from stock_movements m join products p on p.id = m.product_id
+     left join stock_movements o on o.id = m.reverses_movement_id ${whereSql}`,
     params,
   );
   return { movements: rows.map(mapMovement), total };

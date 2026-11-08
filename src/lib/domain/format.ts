@@ -1,4 +1,4 @@
-import { APP_CURRENCY, APP_LOCALE, APP_TIME_ZONE } from "@/lib/config";
+import { APP_CURRENCY, APP_LOCALE, APP_TIME_ZONE } from "@/lib/constants";
 import { type BaseUnit, unitLabel } from "./units";
 
 const currencyFormatter = new Intl.NumberFormat(APP_LOCALE, {
