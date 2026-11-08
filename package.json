@@ -10,13 +10,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:pg": "TEST_DB=postgres vitest run tests/integration",
     "test:watch": "vitest",
-    "e2e": "playwright test --trace off",
-    "db:migrate": "tsx scripts/migrate.ts"
+    "e2e": "playwright test --trace off"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.6.0",
@@ -43,5 +41,8 @@
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "vitest": "5.1.0"
+  },
+  "overrides": {
+    "zod": "4.6.7"
   }
 }
