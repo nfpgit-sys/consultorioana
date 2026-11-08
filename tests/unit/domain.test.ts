@@ -182,3 +182,21 @@ describe("fechas y moneda", () => {
     expect(formatARS(1234.5).replace(/\s/g, " ")).toBe("$ 1.234,50");
   });
 });
+
+import { normalizeConnectionString } from "@/lib/db/postgres";
+import { pgTimestampToIso } from "@/lib/db/types";
+
+describe("conexión a PostgreSQL", () => {
+  it("fija sslmode=verify-full y quita channel_binding", () => {
+    const url = normalizeConnectionString("postgresql://u:p@ep-x-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require");
+    expect(url).toContain("sslmode=verify-full");
+    expect(url).not.toContain("channel_binding");
+    expect(normalizeConnectionString("postgres://postgres@127.0.0.1:5432/db")).toBe("postgres://postgres@127.0.0.1:5432/db");
+  });
+
+  it("convierte timestamptz de cualquier zona a ISO", () => {
+    expect(pgTimestampToIso("2026-11-08 02:39:23.805+00")).toBe("2026-11-08T02:39:23.805Z");
+    expect(pgTimestampToIso("2026-11-07 23:39:23.805-03")).toBe("2026-11-08T02:39:23.805Z");
+    expect(pgTimestampToIso("2026-11-08 08:09:23+05:30")).toBe("2026-11-08T02:39:23.000Z");
+  });
+});

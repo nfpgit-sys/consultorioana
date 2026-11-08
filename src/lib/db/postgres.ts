@@ -10,10 +10,27 @@ const customTypes = {
   },
 };
 
+/**
+ * Ajusta la URL de conexión: `sslmode=require` (lo que entregan Neon y Supabase) se fija como
+ * `verify-full`, que es lo que node-postgres ya aplica hoy (TLS con certificado verificado),
+ * para que no cambie de significado en versiones futuras del driver.
+ */
+export function normalizeConnectionString(raw: string): string {
+  try {
+    const url = new URL(raw);
+    const mode = url.searchParams.get("sslmode");
+    if (mode === "require" || mode === "prefer" || mode === "verify-ca") url.searchParams.set("sslmode", "verify-full");
+    url.searchParams.delete("channel_binding");
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
 /** PostgreSQL real (Neon, Supabase u otro) mediante node-postgres. */
 export function createPostgresDatabase(connectionString: string): Database {
   const pool = new pg.Pool({
-    connectionString,
+    connectionString: normalizeConnectionString(connectionString),
     max: Number(process.env.DB_POOL_MAX ?? 5),
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,
