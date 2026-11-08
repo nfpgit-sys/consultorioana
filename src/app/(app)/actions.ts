@@ -44,7 +44,7 @@ function numOrNull(value: Num, field: string): number | null {
   return num(value, field) ?? null;
 }
 
-const allowedSource = (s: unknown): Source => (s === "texto" || s === "voz" ? s : "manual");
+const allowedSource = (s: unknown): Source => (s === "texto" || s === "voz" || s === "factura" ? s : "manual");
 
 // ---------- Productos ----------
 
@@ -412,5 +412,27 @@ export async function setActorNameAction(name: string) {
       return { actor };
     },
     { message: "Nombre actualizado." },
+  );
+}
+
+// ---------- Facturas ----------
+
+export async function discardDocumentAction(id: string, reason: string) {
+  return runAction(
+    async () => {
+      const { discardDocument } = await import("@/lib/services/documents");
+      return discardDocument(await getDb(), id, reason, await getActionContext("factura"));
+    },
+    { message: "Factura descartada." },
+  );
+}
+
+export async function writeOffLotAction(lotId: string) {
+  return runAction(
+    async () => {
+      const { writeOffLot } = await import("@/lib/services/movements");
+      return (await writeOffLot(await getDb(), { lotId }, await getActionContext("manual"))).result;
+    },
+    { message: "Lote dado de baja por vencimiento." },
   );
 }

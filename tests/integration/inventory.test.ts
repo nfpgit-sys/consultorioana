@@ -4,6 +4,7 @@ import { DomainError } from "@/lib/services/errors";
 import {
   adjustStock,
   listMovements,
+  writeOffLot,
   planReversal,
   previewMovements,
   registerMovements,
@@ -238,6 +239,23 @@ describe("lotes y vencimientos", () => {
     ]);
     expect((await getProduct(db, id))?.currentStock).toBe(8);
     await expectDomainError(adjustStock(db, { productId: id, newStock: 5, reason: "conteo" }, manual), "operacion_invalida");
+  });
+});
+
+describe("baja por vencimiento", () => {
+  it("da de baja un lote vencido con un movimiento de tipo vencimiento", async () => {
+    const id = await newProduct("Adhesivo dental", {
+      tracksExpiry: true,
+      initialStock: 3,
+      initialLotCode: "V-1",
+      initialExpiresOn: "2020-01-31",
+    });
+    const [lot] = await db.query<{ id: string }>("select id from lots where product_id = $1", [id]);
+    await writeOffLot(db, { lotId: lot.id }, manual);
+    expect((await getProduct(db, id))?.currentStock).toBe(0);
+    const { movements } = await listMovements(db, { productId: id, kind: "vencimiento" });
+    expect(movements[0]).toMatchObject({ quantity: -3, lotCode: "V-1" });
+    await expectDomainError(writeOffLot(db, { lotId: lot.id }, manual), "lote_vacio");
   });
 });
 

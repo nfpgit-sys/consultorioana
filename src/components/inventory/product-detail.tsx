@@ -9,6 +9,7 @@ import {
   archivePresentationAction,
   archiveProductAction,
   unarchiveProductAction,
+  writeOffLotAction,
 } from "@/app/(app)/actions";
 import { Alert } from "@/components/ui/alert";
 import { Badge, StockBadge } from "@/components/ui/badge";
@@ -194,6 +195,20 @@ export function ProductDetail({
                             <Badge tone={days < 0 ? "danger" : days <= 30 ? "danger" : days <= 60 ? "warning" : "success"}>
                               {days < 0 ? `Vencido hace ${-days} d` : days === 0 ? "Vence hoy" : `${days} días`}
                             </Badge>
+                          )}
+                          {days !== null && days < 0 && !archived && (
+                            <button
+                              type="button"
+                              className="mt-1 block text-xs font-medium text-rose-700 hover:underline"
+                              disabled={pending}
+                              onClick={() => {
+                                if (window.confirm(`¿Dar de baja ${formatQuantity(l.quantity, product.baseUnit)} del lote ${l.lotCode ?? "sin número"} por vencimiento?`)) {
+                                  run(() => writeOffLotAction(l.id));
+                                }
+                              }}
+                            >
+                              Dar de baja
+                            </button>
                           )}
                         </div>
                       </div>

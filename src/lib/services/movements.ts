@@ -577,3 +577,35 @@ export async function getMovement(q: Queryable, id: string): Promise<Movement | 
   );
   return rows[0] ? mapMovement(rows[0]) : null;
 }
+
+/** Baja por vencimiento: descuenta todo lo que queda de un lote (queda registrado como "vencimiento"). */
+export async function writeOffLot(db: Database, raw: { lotId: string; reason?: string | null }, ctx: import("./context").ActionContext) {
+  const lotId = uuid.parse(raw.lotId);
+  try {
+    return await db.transaction(async (tx) => {
+      const [lot] = await tx.query<{ product_id: string; quantity: string; lot_code: string | null; expires_on: string | null }>(
+        "select product_id, quantity, lot_code, expires_on from lots where id = $1",
+        [lotId],
+      );
+      if (!lot) throw new NotFoundError("El lote");
+      const qty = toNumber(lot.quantity);
+      if (qty <= 0) throw new DomainError("lote_vacio", "El lote ya no tiene stock.");
+      const product = await lockProductForStock(tx, lot.product_id);
+      if (!product) throw new NotFoundError("El producto");
+      return withOperation(tx, ctx, { kind: "baja_vencimiento", summary: `Baja por vencimiento: ${product.name}` }, async (operationId) => {
+        const applied = await applyStockChange(tx, ctx, operationId, {
+          product,
+          delta: -qty,
+          kind: "vencimiento",
+          reason: raw.reason?.trim() || `Baja por vencimiento del lote ${lot.lot_code ?? "sin número"}${lot.expires_on ? ` (vencía ${lot.expires_on})` : ""}`,
+          unitCost: product.unit_cost,
+          lot: { lotId },
+        });
+        await audit(tx, ctx, { entityType: "lote", entityId: lotId, action: "baja_vencimiento", details: { cantidad: qty }, operationId });
+        return { movements: applied.map((a) => ({ id: a.id, number: a.number })) };
+      });
+    });
+  } catch (err) {
+    throw translateDbError(err);
+  }
+}
