@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+
+  --color-brand-50: #effcfa;
+  --color-brand-100: #cdf7ef;
+  --color-brand-200: #9beedf;
+  --color-brand-300: #62ddca;
+  --color-brand-400: #31c4b1;
+  --color-brand-500: #17a898;
+  --color-brand-600: #0f867b;
+  --color-brand-700: #106b64;
+  --color-brand-800: #125551;
+  --color-brand-900: #134744;
+  --color-brand-950: #042b2a;
+
+  --color-ink: #0f1f24;
+  --color-muted: #5b6b70;
+  --color-line: #e2e8ea;
+  --color-canvas: #f5f8f8;
+
+  --radius-card: 1rem;
+  --shadow-card: 0 1px 2px rgb(15 31 36 / 0.06), 0 1px 1px rgb(15 31 36 / 0.03);
+  --shadow-float: 0 10px 30px rgb(15 31 36 / 0.16), 0 2px 6px rgb(15 31 36 / 0.08);
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-feature-settings: "tnum" 1;
+  }
+  /* Evita el zoom automático de iOS al enfocar campos (requiere >=16px). */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  @media (min-width: 768px) {
+    input,
+    select,
+    textarea {
+      font-size: 0.9375rem;
+    }
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+  dialog::backdrop {
+    background: rgb(15 31 36 / 0.45);
+  }
+}
+
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(23 168 152 / 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgb(23 168 152 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(23 168 152 / 0);
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 1.6s ease-out infinite;
+}

@@ -1,77 +1,91 @@
-# Clínica Clara
+# consultorIA
 
-Aplicación web para administrar inventario, compras, gastos y movimientos de un consultorio odontológico. La interfaz está en español y usa ARS y `America/Argentina/Buenos_Aires` por defecto. Es una herramienta administrativa, no un sistema de contabilidad fiscal certificado.
+Aplicación web para gestionar el **inventario, los consumos, las compras y los gastos** de un consultorio odontológico, con un **asistente de IA** que entiende instrucciones en español argentino (texto o voz) y **lectura automática de facturas**.
 
-## Arquitectura actual
+- Moneda ARS, zona horaria `America/Argentina/Buenos_Aires`, interfaz en español rioplatense.
+- Pensada primero para celular; funciona igual en computadora.
+- Ninguna operación del asistente se registra sin una confirmación explícita.
 
-- Next.js Pages Router, React y JavaScript, conservando la arquitectura que ya tenía el repositorio.
-- Supabase Auth en cookies seguras y Supabase PostgreSQL con RLS para separar consultorios.
-- Zod valida entradas de las API. Las operaciones que cambian stock o dinero llaman funciones PostgreSQL con transacciones.
-- `NUMERIC` guarda cantidades y dinero; los totales del dashboard se suman en centavos con `BigInt`.
-- Las tablas expuestas tienen RLS. El navegador no recibe una clave `service_role`.
+## Funcionalidades
 
-Migración inicial: `supabase/migrations/202610260001_inventory_core.sql`.
+| Área | Qué hace |
+|---|---|
+| Inventario | Alta con el botón «+», edición, archivo (sin borrar historia), presentaciones con equivalencia explícita (1 caja = 100 unidades), unidades físicas convertibles (g/kg, ml/l), estado suficiente / bajo / agotado, valor del stock con costo promedio ponderado. |
+| Movimientos | Consumos, ingresos, ajustes por conteo, reversiones. Historial inmutable con producto, cantidad, tipo, fecha y hora, motivo, origen (manual, texto, voz, factura) y quién lo registró. Stock nunca negativo. |
+| Asistente | «Hoy gasté 3 jeringas», «Compramos 5 tubos de pasta», «¿Cuántos guantes quedan?», «¿Qué productos están por agotarse?», «Mostrame cuánto gastamos este mes». Tarjetas de confirmación, advertencias de duplicado, confirmación reforzada para operaciones sensibles y «Deshacer». Dictado por voz (es-AR). Modo básico sin IA si no hay clave o si se agota el cupo gratuito. |
+| Compras y gastos | Compras con varias líneas, proveedor, IVA y percepciones; compras pendientes de precio; anulación con reversión de stock. Gastos generales por categoría. Detección de comprobantes duplicados. |
+| Facturas | Foto o PDF → extracción con IA → relación con el catálogo (seguras, dudosas, nuevas) → vista previa editable → confirmación. Alias aprendidos por proveedor. Sin IA: carga manual con el comprobante a la vista. |
+| Lotes y vencimientos | Por producto (opcional). Consumo automático del lote que vence primero, alertas a 60/30 días y baja por vencimiento. |
+| Panel y reportes | Indicadores, alertas, consumos del mes, evolución de gastos (6 meses), reportes por período / categoría / producto, exportación a Excel (.xlsx). |
+| Respaldos | Descarga de respaldo completo (JSON) y restauración transaccional; recordatorio semanal. |
 
-## Requisitos
+## Inicio rápido (desarrollo local)
 
-- Node.js 20.9 o posterior y npm.
-- Proyecto Supabase propio con PostgreSQL y Auth.
-- Git para versionar migraciones y configuración.
-
-## Instalación local
+Requisitos: Node.js 20.9 o superior.
 
 ```bash
 npm install
-cp .env.example .env.local
 ```
-
-Completa `.env.local` con la URL del proyecto y la clave pública `anon`/publishable de Supabase. No pongas `service_role`, claves de IA ni otros secretos en variables `NEXT_PUBLIC_*`.
-
-En Supabase, aplica la migración desde SQL Editor o con Supabase CLI:
-
-```bash
-npx supabase login
-npx supabase link --project-ref TU_PROJECT_REF
-npx supabase db push
-```
-
-La migración no inserta productos de muestra. En Authentication, habilita Email/Password y crea/invita usuarios desde el panel de Supabase. La primera persona autenticada que configure el consultorio queda como propietaria. Los nuevos usuarios deben ser agregados a `clinic_members` por un administrador con un flujo administrativo seguro; no se ofrece aún una pantalla de invitaciones.
-
-El bucket privado para comprobantes todavía no se crea porque la carga/revisión de facturas no está implementada. No cargues documentos en buckets públicos.
-
-## Ejecutar y verificar
 
 ```bash
 npm run dev
-npm test
-npm run build
-npm start
 ```
 
-`npm test` ejecuta pruebas unitarias de esquemas de entrada y aritmética decimal. La migración no ha sido aplicada ni probada contra un proyecto Supabase desde este entorno sin credenciales.
+Abrí http://localhost:3000. **No hace falta configurar nada**: los datos se guardan en una base PostgreSQL embebida (`.data/pglite`, persistente entre reinicios). Sin `CLAVE_CONSULTORIO` el acceso local queda abierto y la interfaz lo avisa; la versión publicada siempre pide la clave.
 
-## Funcionalidades implementadas
+Para probar la IA en local, creá `.env.local` con `GEMINI_API_KEY=...` (ver `.env.example`).
 
-- Inicio de sesión, cierre de sesión y creación inicial del espacio del consultorio.
-- Dashboard con datos consultados en PostgreSQL, alertas agotado/bajo, gastos del mes y actividad reciente.
-- Catálogo con búsqueda, unidades base, stock inicial auditado, edición de metadatos y archivado lógico. La unidad base no puede cambiar si ya existe historial.
-- Entradas manuales, consumos sin gasto asociado y ajustes a cantidad absoluta, con bloqueo de stock negativo y registro del antes/después.
-- Registro de compra de una línea en unidad base: crea compra, línea, gasto único y entrada de stock en una transacción. Incluye idempotencia para reintentos con la misma clave.
-- Gastos manuales independientes, proveedores básicos e historial de movimientos.
-- Exportación CSV de los gastos mostrados, con neutralización de fórmulas.
-- Consultas sencillas locales por texto y dictado del navegador cuando la API de voz está disponible. Las operaciones mutativas no las ejecuta el asistente.
-- Layout responsive, mensajes de error, etiquetas accesibles y controles manuales disponibles sin IA.
+## Configuración
 
-## Límites conocidos y siguientes etapas
+Todas las variables están documentadas en [`.env.example`](.env.example).
 
-Esta entrega es una base integrada, no cubre todo el alcance del prompt. No se implementaron aún: gestión de roles e invitaciones desde UI, filtros de período/proveedor/categoría en informes, gráficos, reversión compensatoria, lotes y vencimientos, conversiones comerciales configurables, adjuntos y extracción/revisión de facturas, almacenamiento privado, transcripción/procesamiento IA de servidor, edición completa de compras, ni pruebas de integración/RLS/concurrencia. El formulario de compra actual registra una línea y cantidades exclusivamente en unidad base. No se deben cargar compras ambiguas ni documentos hasta incorporar el flujo de borrador y revisión.
+| Variable | Producción | Para qué |
+|---|---|---|
+| `DATABASE_URL` | Obligatoria | PostgreSQL (Neon recomendado). Las migraciones se aplican solas al primer uso. |
+| `CLAVE_CONSULTORIO` | Obligatoria | Clave de acceso compartida del consultorio. |
+| `SESSION_SECRET` | Recomendada | Secreto aleatorio para firmar sesiones. |
+| `GEMINI_API_KEY` | Opcional | Activa el asistente con IA y la lectura de facturas con Gemini (Google). Se obtiene en [Google AI Studio](https://aistudio.google.com/apikey). |
+| `ANTHROPIC_API_KEY`, `IA_PROVEEDOR` | Opcional | Alternativa con Claude (Anthropic). Si hay clave de Gemini se usa Gemini, salvo `IA_PROVEEDOR=claude`. |
+| `BLOB_READ_WRITE_TOKEN` | Opcional | Guarda una copia privada de cada factura (Vercel Blob). |
+| `IA_MODELO_ASISTENTE`, `IA_MODELO_FACTURAS` | Opcional | Cambian los modelos. Con Gemini, por defecto `gemini-flash-lite-latest` y `gemini-flash-latest` (alias que Google actualiza solo); con Claude, `claude-haiku-5-5` y `claude-opus-5-5`. |
 
-No se declara configurado el proveedor IA porque no está implementado el cliente de IA. La variable `OPENAI_API_KEY` del ejemplo está reservada para una etapa futura y no altera el comportamiento actual. El dictado del navegador puede transmitir audio al proveedor del navegador según su implementación; para un entorno con requisitos estrictos de privacidad, desactivalo hasta integrar transcripción del lado servidor.
+Si falta algo, la aplicación **no se bloquea**: muestra el problema en la sección afectada y en **Ajustes → Estado del sistema**. La única excepción deliberada es la clave de acceso: sin ella, la versión publicada no deja entrar (para no exponer datos).
 
-## Despliegue
+## Despliegue en Vercel
 
-En Vercel, configura `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` en los entornos correspondientes, aplica la migración al proyecto Supabase y ejecuta el build de producción. Mantén activas las copias de seguridad de PostgreSQL y conserva las migraciones versionadas. No se ejecutó un despliegue durante esta tarea.
+1. Crear el proyecto en Vercel conectado a este repositorio (framework Next.js, sin configuración extra).
+2. En **Storage**, crear una base **Neon (Postgres)** y conectarla al proyecto: define `DATABASE_URL`.
+3. En **Storage**, crear un **Blob store privado** y conectarlo: define `BLOB_READ_WRITE_TOKEN`.
+4. En **Settings → Environment Variables**: `CLAVE_CONSULTORIO`, `SESSION_SECRET` y, si se usa IA, `GEMINI_API_KEY` (marcada como *Sensitive*).
+5. Desplegar y verificar: `GET /api/salud` debe responder `{"ok":true,"base":"ok",...}`; luego ingresar con la clave, crear un producto, recargar y comprobar que sigue ahí.
 
-## Variables
+Cambiar `CLAVE_CONSULTORIO` y volver a desplegar cierra la sesión de todos los dispositivos.
 
-Ver `.env.example`. Las claves privadas de proveedores externos deben permanecer en el servidor y no están requeridas por las funciones actuales.
+## Pruebas
+
+```bash
+npm test
+```
+
+```bash
+npm run test:pg
+```
+
+```bash
+npm run build && npm run e2e
+```
+
+- `npm test`: unitarias e integración sobre PostgreSQL embebido (dominio, stock, compras, gastos, lotes, idempotencia, agente, facturas).
+- `npm run test:pg`: las mismas pruebas de integración contra un PostgreSQL 16 real (incluye concurrencia). Requiere los binarios de PostgreSQL en el sistema (`PG_BIN`).
+- `npm run e2e`: Playwright contra el build de producción, en vista de computadora y de celular.
+
+## Documentación
+
+- [Arquitectura, decisiones y seguridad](docs/ARQUITECTURA.md)
+
+## Límites conocidos
+
+- La IA usa Gemini. Su plan gratuito tiene un cupo chico por minuto y por día, y Google puede usar y revisar lo que se envía para mejorar sus productos: no cargar datos de pacientes (activando la facturación en Google eso deja de aplicarse). Sin clave, o con el cupo agotado, el asistente entiende frases simples y las facturas se cargan a mano.
+- El dictado usa el reconocimiento de voz del navegador (Chrome, Edge, Safari); en Firefox no está disponible. En el celular también sirve el micrófono del teclado.
+- El respaldo JSON no incluye las imágenes de facturas (quedan en el almacenamiento de archivos).
+- Es una herramienta de gestión interna: no reemplaza la contabilidad ni emite comprobantes fiscales.
