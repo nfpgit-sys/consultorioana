@@ -19,6 +19,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "1.6.0",
     "@electric-sql/pglite": "0.5.15",
+    "@google/genai": "2.31.0",
     "@vercel/blob": "2.8.2",
     "clsx": "2.1.1",
     "lucide-react": "1.70.0",

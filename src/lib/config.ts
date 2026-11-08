@@ -30,29 +30,80 @@ export function getDbConfig(): DbConfig {
   return { kind: "pglite", dataDir: path.join(process.cwd(), ".data", "pglite") };
 }
 
+export type AiProvider = "gemini" | "anthropic";
+
 export type AiConfig =
-  | { enabled: true; assistantModel: string; invoiceModel: string }
+  | {
+      enabled: true;
+      provider: AiProvider;
+      providerName: string;
+      /** Nombre de la variable de entorno que aporta la clave (nunca su valor). */
+      keyVar: string;
+      assistantModel: string;
+      invoiceModel: string;
+      /** Aviso de privacidad para mostrar junto a los lugares donde se envían datos a la IA. */
+      privacyNote: string | null;
+    }
   | { enabled: false; reason: string };
 
 /**
- * Modelos aprobados en la propuesta: uno rápido y económico para instrucciones cortas
- * y uno más potente para leer facturas. Se pueden cambiar por variables de entorno.
+ * Modelos por defecto de cada proveedor: uno rápido y económico para las instrucciones
+ * del asistente y uno más capaz para leer facturas. Se cambian con IA_MODELO_ASISTENTE e
+ * IA_MODELO_FACTURAS. En Gemini se usan los alias "-latest", que Google actualiza solo
+ * cuando retira un modelo (así la app no deja de funcionar por un cambio de versión).
  */
-export const DEFAULT_ASSISTANT_MODEL = "claude-haiku-5-5";
-export const DEFAULT_INVOICE_MODEL = "claude-opus-5-5";
+export const AI_DEFAULTS: Record<AiProvider, { name: string; assistantModel: string; invoiceModel: string }> = {
+  gemini: { name: "Gemini (Google)", assistantModel: "gemini-flash-lite-latest", invoiceModel: "gemini-flash-latest" },
+  anthropic: { name: "Claude (Anthropic)", assistantModel: "claude-haiku-5-5", invoiceModel: "claude-opus-5-5" },
+};
+
+export const GEMINI_PRIVACY_NOTE =
+  "Lo que se envía a la IA lo procesa Google (Gemini). En el plan gratuito, Google puede usar y revisar esos datos para mejorar sus productos: no incluyas datos de pacientes.";
+
+/** Variable que aporta la clave de Gemini (la primera definida), o null. */
+export function geminiKeyVar(): "GEMINI_API_KEY" | "GOOGLE_API_KEY" | null {
+  if (process.env.GEMINI_API_KEY?.trim()) return "GEMINI_API_KEY";
+  if (process.env.GOOGLE_API_KEY?.trim()) return "GOOGLE_API_KEY";
+  return null;
+}
 
 export function getAiConfig(): AiConfig {
-  if (!process.env.ANTHROPIC_API_KEY?.trim()) {
+  const gemini = geminiKeyVar();
+  const anthropic = process.env.ANTHROPIC_API_KEY?.trim() ? "ANTHROPIC_API_KEY" : null;
+  const requested = process.env.IA_PROVEEDOR?.trim().toLowerCase() || null;
+
+  let provider: AiProvider | null;
+  if (requested) {
+    if (requested === "gemini" || requested === "google") provider = "gemini";
+    else if (requested === "claude" || requested === "anthropic") provider = "anthropic";
+    else return { enabled: false, reason: `IA_PROVEEDOR tiene un valor no válido («${requested}»): usá «gemini» o «claude».` };
+    if (provider === "gemini" && !gemini) {
+      return { enabled: false, reason: "IA_PROVEEDOR indica Gemini, pero falta la clave GEMINI_API_KEY. El asistente usa el modo básico sin IA." };
+    }
+    if (provider === "anthropic" && !anthropic) {
+      return { enabled: false, reason: "IA_PROVEEDOR indica Claude, pero falta la clave ANTHROPIC_API_KEY. El asistente usa el modo básico sin IA." };
+    }
+  } else {
+    // Sin preferencia explícita: Gemini si hay clave de Google; si no, Claude.
+    provider = gemini ? "gemini" : anthropic ? "anthropic" : null;
+  }
+
+  if (!provider) {
     return {
       enabled: false,
       reason:
-        "Falta la clave de IA (ANTHROPIC_API_KEY). El inventario funciona igual; el asistente usa el modo básico sin IA y la lectura de facturas no está disponible.",
+        "Falta la clave de IA (GEMINI_API_KEY). El inventario funciona igual; el asistente usa el modo básico sin IA y la lectura de facturas no está disponible.",
     };
   }
+  const defaults = AI_DEFAULTS[provider];
   return {
     enabled: true,
-    assistantModel: process.env.IA_MODELO_ASISTENTE?.trim() || DEFAULT_ASSISTANT_MODEL,
-    invoiceModel: process.env.IA_MODELO_FACTURAS?.trim() || DEFAULT_INVOICE_MODEL,
+    provider,
+    providerName: defaults.name,
+    keyVar: provider === "gemini" ? (gemini as string) : "ANTHROPIC_API_KEY",
+    assistantModel: process.env.IA_MODELO_ASISTENTE?.trim() || defaults.assistantModel,
+    invoiceModel: process.env.IA_MODELO_FACTURAS?.trim() || defaults.invoiceModel,
+    privacyNote: provider === "gemini" ? GEMINI_PRIVACY_NOTE : null,
   };
 }
 

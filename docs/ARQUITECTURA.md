@@ -13,11 +13,11 @@ Next.js 16 en Vercel (App Router, Node.js)
   ├─ Páginas (Server Components) ── leen datos con los servicios
   ├─ Server Actions / Route Handlers ── escriben siempre a través de los servicios
   ├─ src/lib/services ..... reglas de negocio + transacciones (única puerta a la base)
-  ├─ src/lib/agent ........ asistente (Claude con herramientas, o intérprete local)
+  ├─ src/lib/agent ........ asistente (Gemini o Claude con herramientas, o intérprete local)
   └─ src/lib/invoices ..... extracción y revisión de facturas
         │                        │                       │
         ▼                        ▼                       ▼
-  PostgreSQL (Neon)        Vercel Blob privado     API de Anthropic
+  PostgreSQL (Neon)        Vercel Blob privado     API de Gemini (Google)
   datos + historial        archivos de facturas    (solo desde el servidor)
 ```
 
@@ -55,7 +55,7 @@ Las migraciones (`src/lib/db/migrations`) se aplican automáticamente al primer 
 Otras medidas:
 
 - **RLS habilitado en todas las tablas sin políticas**: el rol dueño (el servidor) opera normalmente, pero si alguna vez se expone la base mediante una API pública, los roles anónimos no ven ni modifican nada.
-- Claves privadas (`ANTHROPIC_API_KEY`, `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`) solo en variables del servidor; nunca `NEXT_PUBLIC_*`.
+- Claves privadas (`GEMINI_API_KEY` o `ANTHROPIC_API_KEY`, `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`) solo en variables del servidor; nunca `NEXT_PUBLIC_*`.
 - Archivos de facturas en Blob **privado**, servidos solo a sesiones válidas.
 - Encabezados de seguridad (`X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`), `robots: noindex`.
 - Los textos que vienen de facturas o de nombres de productos se tratan como datos, no como instrucciones (mitigación de *prompt injection*); además ninguna salida del modelo se ejecuta sin confirmación humana.
@@ -86,13 +86,13 @@ Las operaciones de stock bloquean las filas de productos (`SELECT … FOR UPDATE
 
 ```
 texto o voz ──► /api/asistente ──► ¿IA configurada?
-                                   ├─ sí: Claude (modelo rápido) + herramientas
+                                   ├─ sí: Gemini Flash-Lite (o Claude) + herramientas
                                    │     · consulta: buscar_productos, listar_stock_bajo, resumen_gastos,
                                    │       consumos, movimientos_recientes, vencimientos, buscar_proveedores
                                    │     · propuesta (no escriben): proponer_movimientos, proponer_compra,
                                    │       proponer_gasto, proponer_producto, proponer_ajuste,
                                    │       proponer_reversion, proponer_presentacion
-                                   └─ no (o si la IA falla): intérprete local de frases frecuentes
+                                   └─ no (o si la IA falla o se agotó el cupo): intérprete local de frases frecuentes
           ◄── respuesta + tarjetas de propuesta (validadas, con advertencias)
 tarjeta "Confirmar" ──► misma acción de servidor que los formularios (con idempotencia y origen texto/voz)
 ```
@@ -101,23 +101,35 @@ tarjeta "Confirmar" ──► misma acción de servidor que los formularios (con
 - Confirmación reforzada (casilla adicional) cuando hay advertencias: posible duplicado, stock que queda en cero, cantidad inusual, producto con nombre parecido, ajustes grandes.
 - El historial de la conversación incluye el estado de cada propuesta (confirmada, cancelada, deshecha) para que el modelo no repita operaciones.
 - Voz: Web Speech API (es-AR). El texto dictado se muestra para revisarlo antes de enviarlo.
+- Las herramientas se definen una sola vez (`src/lib/agent/tools.ts`, esquema JSON) y se adaptan a cada proveedor: Claude las recibe como esquemas estrictos; Gemini, convertidas a su formato OpenAPI con `nullable` (`src/lib/ai/gemini-schema.ts`).
+- Con Gemini, la respuesta del modelo se devuelve tal cual en el turno siguiente (incluye las *firmas de pensamiento* que exige al usar herramientas), la ejecución automática del SDK está desactivada y no se reintenta ante un 429: si se agotó el cupo, se responde al instante con el modo básico y un aviso.
 
 ## 6. Facturas
 
 1. Fotos (comprimidas en el navegador a JPEG ≤ 2000 px) o un PDF (≤ 4 MB por el límite de las funciones de Vercel).
 2. Se guarda una copia privada y se calcula el hash (archivo repetido → aviso).
-3. Claude (modelo potente) extrae los datos con **salidas estructuradas** (esquema estricto; null cuando no se lee) y con respaldo automático del servidor si el modelo declina.
+3. La IA extrae los datos con **salida estructurada** (null cuando no se lee). Con Gemini (`gemini-flash-latest`), el esquema de salida se deriva del mismo esquema zod que después valida la respuesta; si no cumple el formato, se rechaza y se ofrece la carga manual. Con Claude se usa además el respaldo automático del servidor si el modelo declina. El texto del comprobante se trata como datos, no como instrucciones.
 4. Revisión: cada línea se compara con el catálogo (alias aprendidos del proveedor primero). Solo es "segura" con alias o nombre idéntico o un candidato muy superior; las dudosas exigen confirmación; las nuevas proponen crear el producto con detección de casi duplicados. Si la factura declara el contenido ("caja x100"), se usa esa equivalencia y se muestra la cuenta.
 5. Al confirmar se registra la compra (o el gasto general) y se aprenden los alias.
 
-## 7. Costos de IA (estimados)
+## 7. Proveedor de IA, costos y privacidad
 
-| Uso | Modelo por defecto | Orden de magnitud |
+**Proveedor elegido: Gemini (Google)**, por su plan gratuito. La app elige el proveedor así: si hay `GEMINI_API_KEY` (o `GOOGLE_API_KEY`) usa Gemini; si solo hay `ANTHROPIC_API_KEY`, Claude; `IA_PROVEEDOR=gemini|claude` fuerza uno. **Ajustes → Estado del sistema** muestra el proveedor y los modelos en uso.
+
+| Uso | Modelo por defecto (Gemini) | Por qué |
 |---|---|---|
-| Instrucción al asistente | `claude-haiku-5-5` ($0,10 / $0,50 por millón de tokens de entrada/salida) | ~US$ 0,001–0,003 por instrucción (1 a 3 llamadas al modelo) |
-| Lectura de factura | `claude-opus-5-5` ($4 / $20 por millón) | ~US$ 0,05–0,15 por factura según páginas y nitidez |
+| Instrucción al asistente | `gemini-flash-lite-latest` | El de mayor cupo gratuito diario; alcanza para interpretar pedidos cortos con herramientas. |
+| Lectura de factura | `gemini-flash-latest` | Mejor lectura de imágenes y PDF; las facturas son menos frecuentes que las instrucciones. |
 
-Con 50 instrucciones diarias y 100 facturas al mes, el costo estimado ronda los US$ 8–20 por mes. Para bajarlo, se puede usar `IA_MODELO_FACTURAS=claude-sonnet-5-5` ($2 / $10 por millón), probando antes con facturas reales que la calidad siga siendo buena. Los modelos se cambian con `IA_MODELO_ASISTENTE` e `IA_MODELO_FACTURAS`. Precios a confirmar en la página de precios de Anthropic.
+Los alias `-latest` apuntan siempre al modelo vigente, así un retiro de versión no deja la app sin IA (Google avisa antes de cambiarlos). Si se prefiere fijar versiones, se usan `IA_MODELO_ASISTENTE` e `IA_MODELO_FACTURAS`.
+
+**Plan gratuito de Gemini — lo que hay que saber:**
+
+- **Cupo**: pocas consultas por minuto y por día por proyecto de Google, y Google lo cambia sin aviso (en 2025-2026 lo redujo varias veces). Cada instrucción al asistente usa de 1 a 3 consultas. Cuando se agota, el asistente sigue en **modo básico** y las facturas se cargan a mano hasta que se renueve. El cupo vigente se ve en Google AI Studio.
+- **Privacidad**: en el plan gratuito, Google puede usar lo enviado (instrucciones y facturas) para mejorar sus productos, y personas de Google pueden revisarlo. Por eso la app avisa en el asistente y en Facturas que no se incluyan datos de pacientes (atención con las órdenes de laboratorio, que suelen traer el nombre del paciente).
+- **Si el uso crece**: activar la facturación en el proyecto de Google AI Studio quita los límites gratuitos y hace que los datos no se usen para mejorar productos. Con el uso de un consultorio, el costo con Flash-Lite y Flash debería rondar centavos de dólar por día. Consultar precios vigentes en la página de precios de Gemini.
+
+**Alternativa con Claude (Anthropic)**, pago por uso: `claude-haiku-5-5` para el asistente (~US$ 0,001–0,003 por instrucción) y `claude-opus-5-5` para facturas (~US$ 0,05–0,15 por factura); con 50 instrucciones diarias y 100 facturas al mes, unos US$ 8–20 por mes. Anthropic no usa los datos de la API para entrenar modelos.
 
 ## 8. Respaldos
 

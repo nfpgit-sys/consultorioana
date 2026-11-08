@@ -53,7 +53,7 @@ function toHistory(messages: ChatMessage[], statuses: Record<string, ProposalSta
 }
 
 export function AssistantPanel({ voiceHint }: { voiceHint: string | null }) {
-  const { open, setOpen, aiEnabled, pendingPrompt, consumePendingPrompt } = useAssistant();
+  const { open, setOpen, aiEnabled, privacyNote, pendingPrompt, consumePendingPrompt } = useAssistant();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [statuses, setStatuses] = useState<Record<string, ProposalStatus>>({});
   const [input, setInput] = useState("");
@@ -213,6 +213,9 @@ export function AssistantPanel({ voiceHint }: { voiceHint: string | null }) {
                 <p className="rounded-2xl bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
                   La IA no está configurada: el asistente entiende frases simples como las de arriba. Con la IA activada entiende pedidos más libres y conversa para aclarar dudas.
                 </p>
+              )}
+              {aiEnabled && privacyNote && (
+                <p className="rounded-2xl border border-line bg-white px-3.5 py-2.5 text-xs text-muted">{privacyNote}</p>
               )}
               {voiceHint && <p className="text-xs text-muted">{voiceHint}</p>}
             </div>

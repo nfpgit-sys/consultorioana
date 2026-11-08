@@ -1,35 +1,35 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { describeAiError } from "@/lib/ai/errors";
 import type { Queryable } from "@/lib/db/types";
 import { getAiConfig } from "@/lib/config";
 import { runClaudeAssistant } from "./claude";
+import { type GeminiClient, runGeminiAssistant } from "./gemini";
 import { runLocalAssistant } from "./local";
 import type { AssistantMessage, AssistantReply } from "./types";
 
 export type { AssistantMessage, AssistantReply, Proposal } from "./types";
 
-function describeApiError(err: unknown): string {
-  if (err instanceof Anthropic.AuthenticationError) return "la clave de IA no es válida";
-  if (err instanceof Anthropic.PermissionDeniedError) return "la clave de IA no tiene permisos para este modelo";
-  if (err instanceof Anthropic.RateLimitError) return "se alcanzó el límite de uso de la IA";
-  if (err instanceof Anthropic.APIConnectionError) return "no hubo conexión con el servicio de IA";
-  if (err instanceof Anthropic.BadRequestError) return "el servicio de IA rechazó el pedido";
-  if (err instanceof Anthropic.APIError) return `el servicio de IA respondió con error ${err.status ?? ""}`.trim();
-  return "ocurrió un error inesperado con la IA";
-}
-
 /**
- * Punto de entrada del asistente: usa Claude si está configurado; si no, o si la IA falla,
- * responde con el intérprete local (modo básico). En ningún caso se registra nada sin confirmación.
+ * Punto de entrada del asistente: usa la IA configurada (Gemini o Claude); si no hay IA,
+ * o si falla (por ejemplo, se agotó el cupo gratuito), responde con el intérprete local
+ * (modo básico). En ningún caso se registra nada sin confirmación.
  */
-export async function runAssistant(q: Queryable, history: AssistantMessage[]): Promise<AssistantReply> {
+export async function runAssistant(
+  q: Queryable,
+  history: AssistantMessage[],
+  deps: { geminiClient?: GeminiClient } = {},
+): Promise<AssistantReply> {
   const last = [...history].reverse().find((m) => m.role === "user")?.content ?? "";
   const ai = getAiConfig();
   if (!ai.enabled) return runLocalAssistant(q, last);
   try {
+    if (ai.provider === "gemini") {
+      return await runGeminiAssistant(q, history, { model: ai.assistantModel, apiKey: process.env[ai.keyVar]?.trim(), client: deps.geminiClient });
+    }
     return await runClaudeAssistant(q, history, { model: ai.assistantModel });
   } catch (err) {
-    console.error("[asistente] fallo de IA:", err);
+    const info = describeAiError(err);
+    console.error(`[asistente] fallo de IA (${info.kind}):`, err);
     const local = await runLocalAssistant(q, last);
-    return { ...local, notice: `No se pudo usar la IA (${describeApiError(err)}). Respondí con el modo básico.` };
+    return { ...local, notice: `No se pudo usar la IA (${info.message}). Respondí con el modo básico.` };
   }
 }

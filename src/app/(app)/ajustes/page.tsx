@@ -55,8 +55,16 @@ export default async function AjustesPage() {
       label: "Inteligencia artificial",
       state: ai.enabled ? "ok" : "warn",
       detail: ai.enabled
-        ? `Activa · asistente: ${ai.assistantModel} · facturas: ${ai.invoiceModel}`
-        : `${ai.reason}`,
+        ? [
+            `Activa con ${ai.providerName} · asistente: ${ai.assistantModel} · facturas: ${ai.invoiceModel}.`,
+            ai.provider === "gemini"
+              ? "El plan gratuito tiene un cupo chico por minuto y por día: si se agota, el asistente sigue en modo básico y las facturas se cargan a mano hasta que se renueve."
+              : null,
+            ai.privacyNote,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        : ai.reason,
     },
     {
       label: "Archivos de facturas",

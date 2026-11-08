@@ -33,7 +33,7 @@ export default async function FacturasPage() {
         <Card className="lg:col-span-3">
           <CardHeader title="Cargar comprobante" description="Facturas, tickets, recibos o remitos de cualquier proveedor" />
           <CardBody>
-            <InvoiceUpload aiEnabled={ai.enabled} />
+            <InvoiceUpload aiEnabled={ai.enabled} privacyNote={ai.enabled ? ai.privacyNote : null} />
           </CardBody>
         </Card>
         <Card className="lg:col-span-2">

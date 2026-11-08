@@ -16,7 +16,8 @@ const MAX_SIDE = 2000;
 
 /** Comprime fotos en el navegador (JPEG, lado mayor 2000 px) para subir rápido y bajar costos. */
 async function compressImage(file: File): Promise<File> {
-  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  // Toda imagen (también GIF, que la IA no lee) se convierte a JPEG liviano antes de subirla.
+  if (!file.type.startsWith("image/")) return file;
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file);
@@ -27,12 +28,16 @@ async function compressImage(file: File): Promise<File> {
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const ctx = canvas.getContext("2d")!;
+  // Fondo blanco: en JPEG las zonas transparentes (PNG/GIF) quedarían negras.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   const blob: Blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No se pudo procesar la imagen."))), "image/jpeg", 0.85));
   return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
 }
 
-export function InvoiceUpload({ aiEnabled }: { aiEnabled: boolean }) {
+export function InvoiceUpload({ aiEnabled, privacyNote = null }: { aiEnabled: boolean; privacyNote?: string | null }) {
   const router = useRouter();
   const [picked, setPicked] = useState<Picked[]>([]);
   const [stage, setStage] = useState<"idle" | "procesando" | "subiendo" | "leyendo">("idle");
@@ -144,9 +149,10 @@ export function InvoiceUpload({ aiEnabled }: { aiEnabled: boolean }) {
       )}
       {!aiEnabled && (
         <Alert tone="warning" title="Lectura automática desactivada">
-          Falta configurar la IA (ANTHROPIC_API_KEY). Igual podés guardar el comprobante y cargar sus datos a mano en la revisión.
+          Falta configurar la IA (GEMINI_API_KEY). Igual podés guardar el comprobante y cargar sus datos a mano en la revisión.
         </Alert>
       )}
+      {aiEnabled && privacyNote && <p className="text-xs text-muted">{privacyNote} Revisá que el comprobante no tenga nombres de pacientes (por ejemplo, órdenes de laboratorio).</p>}
       {error && <Alert tone="error">{error}</Alert>}
     </div>
   );

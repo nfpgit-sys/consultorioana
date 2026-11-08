@@ -11,7 +11,7 @@ export const maxDuration = 120;
 
 const MAX_FILES = 6;
 const MAX_TOTAL_BYTES = 4_300_000; // límite de cuerpo de las funciones de Vercel: 4,5 MB
-const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"];
+const ALLOWED = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 
 /** Sube una factura (fotos o PDF), la guarda y, si la IA está configurada, la analiza. */
 export async function POST(request: Request) {
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     try {
       const result = await extractInvoice(
         files.map((f, i) => ({ mimeType: f.type, data: buffers[i] })),
-        ai.invoiceModel,
+        ai,
       );
       await saveExtraction(db, doc.id, result);
       return Response.json({ documentId: doc.id, status: "analizado", notice: notices[0] ?? null });

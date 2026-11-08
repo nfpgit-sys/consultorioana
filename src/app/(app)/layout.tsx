@@ -16,6 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         actor: await getActorName(),
         openAccess: auth.mode === "abierto-local",
         aiEnabled: ai.enabled,
+        aiPrivacyNote: ai.enabled ? ai.privacyNote : null,
         voiceHint: null,
       }}
     >

@@ -1,6 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ApiError, type Content, FinishReason, type GenerateContentParameters, GenerateContentResponse, type Part } from "@google/genai";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { runAssistant } from "@/lib/agent";
 import { runClaudeAssistant, type MessagesClient } from "@/lib/agent/claude";
+import { type GeminiClient, runGeminiAssistant } from "@/lib/agent/gemini";
 import { parseItems, parsePeriod, runLocalAssistant } from "@/lib/agent/local";
 import type { Database } from "@/lib/db/types";
 import { createExpense } from "@/lib/services/expenses";
@@ -249,5 +252,149 @@ describe("agente con Claude (cliente simulado)", () => {
     const r = await runClaudeAssistant(db, [{ role: "user", content: "algo" }], { model: "x", client });
     expect(r.proposals).toHaveLength(0);
     expect(r.reply).toContain("No puedo ayudar");
+  });
+});
+
+/* ------------------------- Gemini (cliente simulado) ------------------------- */
+
+function geminiResponse(parts: Part[], finishReason: FinishReason = FinishReason.STOP): GenerateContentResponse {
+  return Object.assign(new GenerateContentResponse(), { candidates: [{ content: { role: "model", parts }, finishReason }] });
+}
+
+/** Gemini falso: cada paso recibe una copia del pedido (el bucle real modifica el arreglo después). */
+function scriptedGemini(
+  steps: ((contents: Content[], params: GenerateContentParameters) => GenerateContentResponse)[],
+): GeminiClient & { calls: GenerateContentParameters[] } {
+  const client = {
+    calls: [] as GenerateContentParameters[],
+    models: {
+      async generateContent(params: GenerateContentParameters): Promise<GenerateContentResponse> {
+        const snapshot = structuredClone(params);
+        client.calls.push(snapshot);
+        const step = steps[client.calls.length - 1] ?? steps[steps.length - 1];
+        return step(snapshot.contents as Content[], snapshot);
+      },
+    },
+  };
+  return client;
+}
+
+const lastFunctionResponse = (contents: Content[]) => contents[contents.length - 1].parts![0].functionResponse!;
+
+describe("agente con Gemini (cliente simulado)", () => {
+  it("busca el producto, propone el consumo, devuelve las firmas de pensamiento y no registra nada", async () => {
+    const client = scriptedGemini([
+      () => geminiResponse([{ functionCall: { id: "c1", name: "buscar_productos", args: { texto: "jeringas" } }, thoughtSignature: "firma-1" }]),
+      (contents) => {
+        const model = contents[contents.length - 2];
+        expect(model.role).toBe("model");
+        expect(model.parts![0].thoughtSignature).toBe("firma-1");
+        const fr = lastFunctionResponse(contents);
+        expect(fr).toMatchObject({ id: "c1", name: "buscar_productos" });
+        const id = (fr.response!.output as { coincidencias: { producto_id: string }[] }).coincidencias[0].producto_id;
+        return geminiResponse([
+          {
+            functionCall: {
+              id: "c2",
+              name: "proponer_movimientos",
+              args: { movimientos: [{ producto_id: id, cantidad: 3, unidad: null, tipo: "consumo", motivo: null }], fecha: null },
+            },
+            thoughtSignature: "firma-2",
+          },
+        ]);
+      },
+      (contents) => {
+        expect((lastFunctionResponse(contents).response!.output as { estado: string }).estado).toBe("propuesta_mostrada_sin_registrar");
+        return geminiResponse([{ text: "Te preparé el consumo de 3 jeringas. Confirmalo en la tarjeta." }]);
+      },
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "hoy gasté 3 jeringas" }], { model: "gemini-flash-lite-latest", client });
+    expect(client.calls).toHaveLength(3);
+    const config = client.calls[0].config!;
+    expect(config.tools![0]).toHaveProperty("functionDeclarations");
+    expect(String(config.systemInstruction)).toContain("consultorIA");
+    expect(config.automaticFunctionCalling).toEqual({ disable: true });
+    expect(config.httpOptions?.retryOptions?.httpStatusCodes).not.toContain(429);
+    expect(r).toMatchObject({ mode: "ia" });
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0].type).toBe("movimientos");
+    expect(r.reply).toContain("Confirmalo");
+    expect((await getProduct(db, ids.jeringa))?.currentStock).toBe(5);
+  });
+
+  it("devuelve el error de validación en la clave «error» para que el modelo pregunte", async () => {
+    const client = scriptedGemini([
+      () =>
+        geminiResponse([
+          {
+            functionCall: {
+              name: "proponer_movimientos",
+              args: { movimientos: [{ producto_id: ids.guantesS, cantidad: 1, unidad: "caja", tipo: "consumo", motivo: null }], fecha: null },
+            },
+          },
+        ]),
+      (contents) => {
+        const fr = lastFunctionResponse(contents);
+        expect(fr.id).toBeUndefined();
+        expect(fr.response).toHaveProperty("error");
+        expect(JSON.stringify(fr.response)).toContain("no está definida");
+        return geminiResponse([{ text: "¿Cuántos guantes trae cada caja?" }]);
+      },
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "usé una caja de guantes de nitrilo" }], { model: "x", client });
+    expect(r.proposals).toHaveLength(0);
+    expect(r.reply).toContain("caja");
+  });
+
+  it("arma el historial con roles de Gemini y descarta respuestas iniciales del asistente", async () => {
+    const client = scriptedGemini([() => geminiResponse([{ text: "Quedan 50 pares." }])]);
+    await runGeminiAssistant(
+      db,
+      [
+        { role: "assistant", content: "Hola" },
+        { role: "user", content: "¿cuántos guantes quedan?" },
+        { role: "assistant", content: "¿De látex o de nitrilo?" },
+        { role: "user", content: "de nitrilo" },
+      ],
+      { model: "x", client },
+    );
+    expect((client.calls[0].contents as Content[]).map((c) => c.role)).toEqual(["user", "model", "user"]);
+  });
+
+  it("un pedido bloqueado por los filtros responde sin propuestas", async () => {
+    const client = scriptedGemini([() => Object.assign(new GenerateContentResponse(), { candidates: [], promptFeedback: { blockReason: "SAFETY" } })]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "algo" }], { model: "x", client });
+    expect(r.proposals).toHaveLength(0);
+    expect(r.reply).toContain("No puedo ayudar");
+  });
+
+  it("reintenta una vez si el modelo arma mal una llamada", async () => {
+    const client = scriptedGemini([
+      () => geminiResponse([], FinishReason.MALFORMED_FUNCTION_CALL),
+      () => geminiResponse([{ text: "¿Qué producto usaste?" }]),
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "usé eso" }], { model: "x", client });
+    expect(client.calls).toHaveLength(2);
+    expect(r.reply).toBe("¿Qué producto usaste?");
+  });
+
+  it("si se agota el cupo de Gemini (429) responde con el modo básico y lo avisa", async () => {
+    for (const k of ["ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "IA_PROVEEDOR", "IA_MODELO_ASISTENTE"]) vi.stubEnv(k, "");
+    vi.stubEnv("GEMINI_API_KEY", "clave-de-prueba");
+    try {
+      const client: GeminiClient = {
+        models: {
+          async generateContent() {
+            throw new ApiError({ status: 429, message: '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}' });
+          },
+        },
+      };
+      const r = await runAssistant(db, [{ role: "user", content: "¿Qué productos están por agotarse?" }], { geminiClient: client });
+      expect(r.mode).toBe("basico");
+      expect(r.notice).toContain("límite de uso de Gemini");
+      expect(r.reply).toContain("Pasta profiláctica");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

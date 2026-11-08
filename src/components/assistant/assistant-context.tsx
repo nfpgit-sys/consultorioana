@@ -6,6 +6,7 @@ interface AssistantContextValue {
   open: boolean;
   setOpen: (open: boolean) => void;
   aiEnabled: boolean;
+  privacyNote: string | null;
   /** Abre el asistente con un texto precargado (por ejemplo desde un botón "Preguntar"). */
   ask: (text: string) => void;
   pendingPrompt: string | null;
@@ -14,7 +15,15 @@ interface AssistantContextValue {
 
 const AssistantContext = createContext<AssistantContextValue | null>(null);
 
-export function AssistantProvider({ children, aiEnabled }: { children: ReactNode; aiEnabled: boolean }) {
+export function AssistantProvider({
+  children,
+  aiEnabled,
+  privacyNote = null,
+}: {
+  children: ReactNode;
+  aiEnabled: boolean;
+  privacyNote?: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
@@ -41,8 +50,8 @@ export function AssistantProvider({ children, aiEnabled }: { children: ReactNode
   }, [pendingPrompt]);
 
   const value = useMemo(
-    () => ({ open, setOpen, aiEnabled, ask, pendingPrompt, consumePendingPrompt }),
-    [open, aiEnabled, ask, pendingPrompt, consumePendingPrompt],
+    () => ({ open, setOpen, aiEnabled, privacyNote, ask, pendingPrompt, consumePendingPrompt }),
+    [open, aiEnabled, privacyNote, ask, pendingPrompt, consumePendingPrompt],
   );
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 }

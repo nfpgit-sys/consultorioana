@@ -16,12 +16,14 @@ export interface ShellInfo {
   actor: string | null;
   openAccess: boolean;
   aiEnabled: boolean;
+  /** Aviso de privacidad del proveedor de IA (por ejemplo, plan gratuito de Gemini). */
+  aiPrivacyNote: string | null;
   voiceHint: string | null;
 }
 
 export function AppShell({ children, info }: { children: ReactNode; info: ShellInfo }) {
   return (
-    <AssistantProvider aiEnabled={info.aiEnabled}>
+    <AssistantProvider aiEnabled={info.aiEnabled} privacyNote={info.aiPrivacyNote}>
       <ShellInner info={info}>{children}</ShellInner>
     </AssistantProvider>
   );
