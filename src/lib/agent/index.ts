@@ -4,6 +4,7 @@ import { getAiConfig } from "@/lib/config";
 import { runClaudeAssistant } from "./claude";
 import { type GeminiClient, runGeminiAssistant } from "./gemini";
 import { runLocalAssistant } from "./local";
+import { cleanAiReply } from "./reply";
 import type { AssistantMessage, AssistantReply } from "./types";
 
 export type { AssistantMessage, AssistantReply, Proposal } from "./types";
@@ -22,10 +23,11 @@ export async function runAssistant(
   const ai = getAiConfig();
   if (!ai.enabled) return runLocalAssistant(q, last);
   try {
-    if (ai.provider === "gemini") {
-      return await runGeminiAssistant(q, history, { model: ai.assistantModel, apiKey: process.env[ai.keyVar]?.trim(), client: deps.geminiClient });
-    }
-    return await runClaudeAssistant(q, history, { model: ai.assistantModel });
+    const result =
+      ai.provider === "gemini"
+        ? await runGeminiAssistant(q, history, { model: ai.assistantModel, apiKey: process.env[ai.keyVar]?.trim(), client: deps.geminiClient })
+        : await runClaudeAssistant(q, history, { model: ai.assistantModel });
+    return { ...result, reply: cleanAiReply(result.reply, result.proposals.length > 0) };
   } catch (err) {
     const info = describeAiError(err);
     console.error(`[asistente] fallo de IA (${info.kind}):`, err);

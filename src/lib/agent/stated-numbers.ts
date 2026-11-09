@@ -72,3 +72,26 @@ export function statedPresentationQuantities(texts: string[], presentationName: 
   }
   return found;
 }
+
+const AFFIRMATIVE = /^\s*(si|exacto|correcto|asi es|dale|ok|okay|eso|claro|tal cual|confirmo|afirmativo|perfecto)\b/;
+
+/** ¿La respuesta de la persona es un «sí» (o equivalente)? */
+export function isAffirmative(text: string): boolean {
+  const t = normalizeText(text);
+  return AFFIRMATIVE.test(t) && !/\bno\b/.test(t);
+}
+
+/**
+ * Equivalencias que el asistente ofreció textualmente en su último mensaje para esa presentación
+ * («¿o es 1 tubo = 1 unidad?», «cada caja trae 100»). Solo cuentan si la persona respondió que sí.
+ */
+export function offeredEquivalenceNumbers(assistantText: string, presentationName: string): number[] {
+  const forms = normalizeText(presentationName)
+    .split(" ")
+    .filter(Boolean)
+    .map((t) => `${singularize(t).replace(/[^a-z0-9]/g, "")}(?:s|es)?`)
+    .join("\\s+");
+  if (!forms) return [];
+  const re = new RegExp(`\\b(?:1|un|una|cada)\\s+${forms}\\s+(?:equivale\\s+a\\s+|trae\\s+|tiene\\s+|son\\s+|contiene\\s+|viene\\s+con\\s+)?(\\d+(?:\\.\\d+)?)`, "g");
+  return [...normalizeText(assistantText).matchAll(re)].map((m) => parseDecimalAR(m[1])).filter((n): n is number => n !== null && n > 0);
+}

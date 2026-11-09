@@ -3,6 +3,7 @@ import { getActionContext, isAuthenticated } from "@/lib/auth/server";
 import { getAiConfig } from "@/lib/config";
 import { DatabaseNotConfiguredError, getDb } from "@/lib/db";
 import { extractInvoice } from "@/lib/invoices/extract";
+import { matchesDeclaredType } from "@/lib/invoices/file-signature";
 import { createDocument, saveExtraction, sha256 } from "@/lib/services/documents";
 import { saveFile } from "@/lib/storage";
 
@@ -42,6 +43,14 @@ export async function POST(request: Request) {
     const db = await getDb();
     const documentId = randomUUID();
     const buffers = await Promise.all(files.map(async (f) => Buffer.from(await f.arrayBuffer())));
+    for (const [i, f] of files.entries()) {
+      if (!matchesDeclaredType(f.type, buffers[i])) {
+        return Response.json(
+          { error: `El archivo «${f.name}» no es un ${f.type === "application/pdf" ? "PDF" : "JPG, PNG o WEBP"} válido. No se registró nada.` },
+          { status: 415 },
+        );
+      }
+    }
     const notices: string[] = [];
     const stored = [];
     for (const [i, f] of files.entries()) {

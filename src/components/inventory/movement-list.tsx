@@ -54,7 +54,7 @@ export function MovementList({ movements, showProduct = true, compact = false }:
                 className={cn(
                   "tabular mt-0.5 w-20 shrink-0 text-right text-[0.95rem] font-semibold sm:w-24",
                   positive ? "text-emerald-700" : "text-rose-700",
-                  m.reversedByNumber && "text-slate-400 line-through",
+                  m.reversedByNumber && "text-slate-500 line-through",
                 )}
               >
                 {positive ? "+" : "−"}

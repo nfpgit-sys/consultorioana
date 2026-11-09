@@ -122,7 +122,7 @@ export function ProductDetail({
               description={`${totalMovements} movimiento${totalMovements === 1 ? "" : "s"} · los errores se corrigen con reversiones`}
               action={
                 totalMovements > movements.length ? (
-                  <Link href={`/movimientos?producto=${product.id}`} className="text-sm font-medium text-brand-700 hover:underline">
+                  <Link href={`/movimientos?producto=${product.id}`} className="inline-flex min-h-6 items-center text-sm font-medium text-brand-700 hover:underline">
                     Ver todos
                   </Link>
                 ) : undefined

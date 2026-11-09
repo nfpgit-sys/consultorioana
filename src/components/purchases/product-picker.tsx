@@ -82,7 +82,7 @@ export function ProductPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className={cn("truncate", !selected && value !== null && "text-slate-400")}>
+        <span className={cn("truncate", !selected && value !== null && "text-slate-500")}>
           {selected ? selected.name : value === null && allowNone ? noneLabel : placeholder}
         </span>
         <ChevronsUpDown className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />

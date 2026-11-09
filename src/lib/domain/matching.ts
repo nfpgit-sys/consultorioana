@@ -17,6 +17,7 @@ const SYNONYM_GROUPS: string[][] = [
   ["eyector", "suctor", "succionador"],
   ["descartable", "desechable"],
   ["guante", "guant"],
+  ["diente", "dental", "dentifrica", "dentifrico"],
 ];
 
 const SYNONYMS = new Map<string, string>();

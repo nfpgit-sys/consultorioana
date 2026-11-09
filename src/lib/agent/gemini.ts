@@ -11,7 +11,7 @@ import {
 import { toGeminiSchema } from "@/lib/ai/gemini-schema";
 import type { Queryable } from "@/lib/db/types";
 import { trackAiCall } from "@/lib/services/ai-usage";
-import { closingReply, dateContext, executeTool, prefetchContext, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
+import { closingReply, dateContext, executeTool, prefetchContext, SYSTEM_PROMPT, TOOL_SPECS, toolContextOf, type ToolInput } from "./tools";
 import type { AssistantMessage, AssistantReply, Proposal } from "./types";
 
 /** Herramientas en el formato de Gemini. Las que no tienen parámetros van sin esquema (Gemini lo exige). */
@@ -75,7 +75,7 @@ export async function runGeminiAssistant(q: Queryable, history: AssistantMessage
   const systemInstruction = [SYSTEM_PROMPT, dateContext(), prefetched].filter(Boolean).join("\n\n");
   const tag = { provider: "gemini", model: opts.model, kind: "asistente" as const };
   let malformedRetries = 0;
-  const toolCtx = { userTexts: userTextsOf(history) };
+  const toolCtx = toolContextOf(history);
 
   for (let i = 0; i < (opts.maxIterations ?? 8); i++) {
     const response = await trackAiCall(q, tag, () => client.models.generateContent({

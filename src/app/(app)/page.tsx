@@ -119,7 +119,7 @@ export default async function HomePage() {
             title="Evolución de gastos"
             description="Últimos 6 meses · compras registradas y gastos generales"
             action={
-              <Link href="/reportes" className="text-sm font-medium text-brand-700 hover:underline">
+              <Link href="/reportes" className="inline-flex min-h-6 items-center text-sm font-medium text-brand-700 hover:underline">
                 Reportes
               </Link>
             }
@@ -149,7 +149,7 @@ export default async function HomePage() {
             description={s.alertsTotal + s.expiring.length === 0 ? "Todo en orden" : undefined}
             action={
               s.alertsTotal > s.alerts.length ? (
-                <Link href="/inventario?estado=bajo" className="text-sm font-medium text-brand-700 hover:underline">
+                <Link href="/inventario?estado=bajo" className="inline-flex min-h-6 items-center text-sm font-medium text-brand-700 hover:underline">
                   Ver todas
                 </Link>
               ) : undefined
@@ -206,7 +206,7 @@ export default async function HomePage() {
             ) : (
               s.consumption.rows.map((r) => (
                 <div key={r.productId} className="flex items-center justify-between gap-2 text-sm">
-                  <Link href={`/inventario/${r.productId}`} className="min-w-0 truncate hover:text-brand-700">
+                  <Link href={`/inventario/${r.productId}`} className="min-w-0 truncate py-0.5 hover:text-brand-700">
                     {r.productName}
                   </Link>
                   <span className="tabular shrink-0 text-right">
@@ -223,7 +223,7 @@ export default async function HomePage() {
           <CardHeader
             title="Movimientos recientes"
             action={
-              <Link href="/movimientos" className="text-sm font-medium text-brand-700 hover:underline">
+              <Link href="/movimientos" className="inline-flex min-h-6 items-center text-sm font-medium text-brand-700 hover:underline">
                 Ver historial
               </Link>
             }

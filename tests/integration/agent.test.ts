@@ -709,3 +709,71 @@ describe("pedido sin verbo (error 3 de la auditoría)", () => {
     expect(r.proposals).toHaveLength(0);
   });
 });
+
+describe("errores menores del asistente", () => {
+  it("acepta «sí» a la equivalencia que ofreció el asistente (punto 1)", async () => {
+    const client = scriptedGemini([
+      () => geminiResponse([{ functionCall: { name: "proponer_presentacion", args: { producto_id: ids.pasta, nombre: "pomo", equivale: 1 } } }]),
+    ]);
+    const r = await runGeminiAssistant(
+      db,
+      [
+        { role: "user", content: "compramos 5 pomos de pasta profiláctica" },
+        { role: "assistant", content: "¿Cuántas unidades trae cada pomo (o es 1 pomo = 1 unidad)?" },
+        { role: "user", content: "sí" },
+      ],
+      { model: "x", client },
+    );
+    expect(r.proposals.map((p) => p.type)).toEqual(["presentacion"]);
+  });
+
+  it("pero no acepta un «sí» si el asistente no había ofrecido esa equivalencia", async () => {
+    const client = scriptedGemini([
+      () => geminiResponse([{ functionCall: { name: "proponer_presentacion", args: { producto_id: ids.pasta, nombre: "pomo", equivale: 1 } } }]),
+      () => geminiResponse([{ text: "¿Cuántas trae cada pomo?" }]),
+    ]);
+    const r = await runGeminiAssistant(
+      db,
+      [
+        { role: "user", content: "compramos 5 pomos de pasta profiláctica" },
+        { role: "assistant", content: "¿Cuántas unidades trae cada pomo?" },
+        { role: "user", content: "sí" },
+      ],
+      { model: "x", client },
+    );
+    expect(r.proposals).toHaveLength(0);
+  });
+
+  it("modo básico: entiende «se nos fueron media docena de …» (punto 2)", async () => {
+    const r = await runLocalAssistant(db, "che, se nos fueron media docena de guantes de nitrilo");
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0]).toMatchObject({ type: "movimientos" });
+    expect(JSON.stringify(r.proposals[0])).toContain('"quantity":6');
+  });
+
+  it("modo básico: «cada caja tiene 100» crea el producto nuevo con 200 unidades y la presentación (punto 2)", async () => {
+    const r = await runLocalAssistant(db, "Agregá dos cajas de guantes de vinilo, cada caja tiene 100 unidades");
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0]).toMatchObject({ type: "producto", input: { initialStock: 200, presentations: [{ name: "caja", factor: 100 }] } });
+  });
+
+  it("modo básico: «cada caja trae 50» en un producto existente prepara primero la presentación (punto 2)", async () => {
+    const r = await runLocalAssistant(db, "usamos 2 cajas de guantes de nitrilo, cada caja trae 50");
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0]).toMatchObject({ type: "presentacion", input: { name: "caja", factor: 50 } });
+    expect(r.reply).toContain("pedime de nuevo");
+  });
+
+  it("modo básico: si no encuentra el producto, nombra la frase completa (punto 2)", async () => {
+    const r = await runLocalAssistant(db, "Compré 20 jeringas de 10 ml");
+    expect(r.proposals).toHaveLength(0);
+    expect(r.reply).toContain("jeringas de 10 ml");
+    expect(r.reply).not.toContain("«10 ml»");
+  });
+
+  it("«pasta dental» encuentra «Pasta de dientes» (punto 2)", async () => {
+    await createProduct(db, { name: "Pasta de dientes", baseUnit: "unidad", initialStock: 3 }, manual);
+    const r = await runLocalAssistant(db, "¿Cuántas pastas dentales quedan?");
+    expect(r.reply).toContain("Pasta de dientes");
+  });
+});
