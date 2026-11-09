@@ -45,3 +45,30 @@ export function statedEquivalenceNumbers(texts: string[], presentationName: stri
 export function isStatedEquivalence(texts: string[], presentationName: string, factor: number): boolean {
   return statedEquivalenceNumbers(texts, presentationName).some((n) => Math.abs(n - factor) < 1e-9);
 }
+
+/**
+ * Cantidades de una presentación que dijo la persona ("agregá 2 cajas" -> [2]),
+ * para detectar un stock inicial cargado en cajas en lugar de unidades base.
+ */
+export function statedPresentationQuantities(texts: string[], presentationName: string): number[] {
+  const presTokens = new Set(normalizeText(presentationName).split(" ").filter(Boolean).map(singularize));
+  const found: number[] = [];
+  for (const text of texts) {
+    const tokens = normalizeText(text).split(" ").filter(Boolean);
+    for (let i = 0; i < tokens.length; i++) {
+      let value: number | null = null;
+      let consumed = 1;
+      if (/^\d+(\.\d+)?$/.test(tokens[i])) value = parseDecimalAR(tokens[i]);
+      else {
+        const words = parseNumberWords(tokens.slice(i));
+        if (words) {
+          value = words.value;
+          consumed = words.consumed;
+        }
+      }
+      if (value !== null && value > 0 && tokens[i + consumed] && presTokens.has(singularize(tokens[i + consumed]))) found.push(value);
+      if (value !== null) i += consumed - 1;
+    }
+  }
+  return found;
+}

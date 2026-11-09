@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isStatedEquivalence, statedEquivalenceNumbers } from "@/lib/agent/stated-numbers";
+import { isStatedEquivalence, statedEquivalenceNumbers, statedPresentationQuantities } from "@/lib/agent/stated-numbers";
 
 describe("equivalencias dichas por la persona", () => {
   it("la cantidad de la presentación no cuenta como equivalencia («usamos 2 cajas»)", () => {
@@ -28,5 +28,14 @@ describe("equivalencias dichas por la persona", () => {
 
   it("toma la respuesta en un mensaje posterior", () => {
     expect(isStatedEquivalence(["usamos 2 cajas de mascarillas", "trae 50"], "caja", 50)).toBe(true);
+  });
+});
+
+describe("cantidades de una presentación", () => {
+  it("detecta cuántas cajas dijo la persona", () => {
+    expect(statedPresentationQuantities(["Agregá dos cajas de guantes, cada caja tiene 100 unidades"], "caja")).toEqual([2]);
+    expect(statedPresentationQuantities(["compramos 3 cajas x50"], "caja")).toEqual([3]);
+    expect(statedPresentationQuantities(["una caja de guantes"], "caja")).toEqual([1]);
+    expect(statedPresentationQuantities(["cada caja trae 100"], "caja")).toEqual([]);
   });
 });

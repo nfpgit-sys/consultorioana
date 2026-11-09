@@ -536,3 +536,29 @@ describe("presentación nueva y operación en el mismo pedido", () => {
     expect(r.proposals.map((p) => p.type)).toEqual(["presentacion"]);
   });
 });
+
+describe("stock inicial de un producto nuevo con presentación", () => {
+  it("rechaza cargar «2» cuando la persona dijo 2 cajas de 100 y pide 200", async () => {
+    const product = (stock: number) => ({
+      nombre: "Guantes de vinilo",
+      categoria: null,
+      unidad_base: "unidad",
+      stock_inicial: stock,
+      stock_minimo: null,
+      costo_unitario: null,
+      controla_vencimiento: false,
+      presentaciones: [{ nombre: "caja", equivale: 100 }],
+    });
+    const client = scriptedGemini([
+      () => geminiResponse([{ functionCall: { name: "proponer_producto", args: product(2) } }]),
+      (contents) => {
+        expect(JSON.stringify(lastFunctionResponse(contents).response)).toContain("2 caja × 100 = 200");
+        return geminiResponse([{ functionCall: { name: "proponer_producto", args: product(200) } }]);
+      },
+      () => geminiResponse([{ text: "Preparé el producto con 200 unidades." }]),
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "Agregá dos cajas de guantes de vinilo, cada caja tiene 100 unidades" }], { model: "x", client });
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0]).toMatchObject({ type: "producto", input: { initialStock: 200 } });
+  });
+});
