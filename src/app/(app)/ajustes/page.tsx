@@ -5,8 +5,9 @@ import { DeviceNameForm } from "@/components/settings/device-name-form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/card";
 import { getActorName } from "@/lib/auth/server";
 import { getAiConfig, getAuthConfig, getDbConfig, getStorageConfig } from "@/lib/config";
-import { formatDateTime } from "@/lib/domain/format";
+import { formatDate, formatDateTime } from "@/lib/domain/format";
 import { loadData } from "@/lib/server/load";
+import { aiUsageSummary } from "@/lib/services/ai-usage";
 import { getSetting } from "@/lib/services/reports";
 
 export const metadata: Metadata = { title: "Ajustes" };
@@ -27,7 +28,7 @@ export default async function AjustesPage() {
   const status = await loadData(async (database) => {
     const [row] = await database.query<{ version: string }>("select max(version) as version from schema_migrations");
     const last = await getSetting<{ at: string }>(database, "ultimo_respaldo");
-    return { schema: row?.version ?? null, lastBackup: last?.at ?? null };
+    return { schema: row?.version ?? null, lastBackup: last?.at ?? null, aiUsage: await aiUsageSummary(database) };
   });
   const actor = await getActorName();
 
@@ -109,6 +110,50 @@ export default async function AjustesPage() {
             ))}
           </CardBody>
         </Card>
+
+        {ai.enabled && status.ok && (
+          <Card className="lg:col-span-2" id="uso-ia">
+            <CardHeader
+              title="Uso de la IA"
+              description={`Hoy: ${status.data.aiUsage.today.requests} consultas a ${ai.providerName} · pico de ${status.data.aiUsage.today.peakPerMinute} en un mismo minuto · ${status.data.aiUsage.today.limited} rechazadas por límite`}
+            />
+            <CardBody className="space-y-3">
+              {status.data.aiUsage.days.length === 0 ? (
+                <p className="text-sm text-muted">Todavía no hay consultas registradas.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-xs text-muted">
+                      <tr>
+                        <th className="py-1.5 pr-3 font-medium">Día</th>
+                        <th className="py-1.5 pr-3 text-right font-medium">Consultas</th>
+                        <th className="py-1.5 pr-3 text-right font-medium">Pico por minuto</th>
+                        <th className="py-1.5 pr-3 text-right font-medium">Rechazadas por límite</th>
+                        <th className="py-1.5 text-right font-medium">Otros errores</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {status.data.aiUsage.days.map((d) => (
+                        <tr key={d.day} className="border-t border-line">
+                          <td className="py-1.5 pr-3">{formatDate(d.day)}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{d.requests}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{d.peakPerMinute}</td>
+                          <td className={`py-1.5 pr-3 text-right tabular-nums ${d.limited > 0 ? "font-semibold text-amber-800" : ""}`}>{d.limited}</td>
+                          <td className="py-1.5 text-right tabular-nums">{d.errors}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="text-xs text-muted">
+                Cada pedido al asistente usa normalmente 1 o 2 consultas; cada factura, 1. Las rechazadas por límite se responden con el modo básico.
+                {ai.provider === "gemini" && " En noviembre de 2026, el plan gratuito de Gemini permitía 15 consultas por minuto para el modelo del asistente (Google puede cambiarlo)."}
+                {status.data.aiUsage.lastLimitedAt && ` Último rechazo por límite: ${formatDateTime(status.data.aiUsage.lastLimitedAt)}.`}
+              </p>
+            </CardBody>
+          </Card>
+        )}
 
         <Card className="lg:col-span-2" id="respaldo">
           <CardHeader

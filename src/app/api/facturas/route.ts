@@ -65,6 +65,7 @@ export async function POST(request: Request) {
       const result = await extractInvoice(
         files.map((f, i) => ({ mimeType: f.type, data: buffers[i] })),
         ai,
+        db,
       );
       await saveExtraction(db, doc.id, result);
       return Response.json({ documentId: doc.id, status: "analizado", notice: notices[0] ?? null });

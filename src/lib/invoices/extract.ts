@@ -6,6 +6,8 @@ import { z } from "zod/v4";
 import { AiUserError, describeAiError } from "@/lib/ai/errors";
 import { toGeminiSchema } from "@/lib/ai/gemini-schema";
 import type { AiConfig } from "@/lib/config";
+import type { Queryable } from "@/lib/db/types";
+import { trackAiCall } from "@/lib/services/ai-usage";
 import { todayAR } from "@/lib/domain/format";
 import { type InvoiceExtraction, InvoiceExtractionSchema } from "./schema";
 
@@ -31,10 +33,14 @@ Reglas:
 export type InvoiceAiSettings = Extract<AiConfig, { enabled: true }>;
 
 /** Extrae los datos de una factura con el proveedor de IA configurado. Los errores salen con un mensaje para la persona. */
-export async function extractInvoice(files: InvoiceFileInput[], ai: InvoiceAiSettings): Promise<{ data: InvoiceExtraction; model: string }> {
+export async function extractInvoice(
+  files: InvoiceFileInput[],
+  ai: InvoiceAiSettings,
+  usage?: Queryable,
+): Promise<{ data: InvoiceExtraction; model: string }> {
   try {
-    if (ai.provider === "gemini") return await extractWithGemini(files, ai.invoiceModel, { apiKey: process.env[ai.keyVar]?.trim() ?? "" });
-    return await extractWithClaude(files, ai.invoiceModel);
+    if (ai.provider === "gemini") return await extractWithGemini(files, ai.invoiceModel, { apiKey: process.env[ai.keyVar]?.trim() ?? "", usage });
+    return await extractWithClaude(files, ai.invoiceModel, usage);
   } catch (err) {
     if (err instanceof AiUserError) throw err;
     const info = describeAiError(err);
@@ -57,7 +63,7 @@ export const GEMINI_INVOICE_SCHEMA = toGeminiSchema(z.toJSONSchema(InvoiceExtrac
 export async function extractWithGemini(
   files: InvoiceFileInput[],
   model: string,
-  opts: { apiKey: string; client?: GeminiInvoiceClient },
+  opts: { apiKey: string; client?: GeminiInvoiceClient; usage?: Queryable },
 ): Promise<{ data: InvoiceExtraction; model: string }> {
   const client: GeminiInvoiceClient = opts.client ?? new GoogleGenAI({ apiKey: opts.apiKey });
   const parts: Part[] = files.map((f) => ({
@@ -65,7 +71,8 @@ export async function extractWithGemini(
   }));
   parts.push({ text: `${INVOICE_PROMPT}\n\nFecha de hoy (referencia): ${todayAR()}.` });
 
-  const response = await client.models.generateContent({
+  const response = await trackAiCall(opts.usage, { provider: "gemini", model, kind: "factura" }, () =>
+    client.models.generateContent({
     model,
     contents: [{ role: "user", parts }],
     config: {
@@ -74,7 +81,8 @@ export async function extractWithGemini(
       maxOutputTokens: 32_768,
       httpOptions: { timeout: 100_000, retryOptions: { attempts: 2, initialDelay: 2, maxDelay: 6, httpStatusCodes: [500, 502, 503, 504] } },
     },
-  });
+    }),
+  );
   const candidate = response.candidates?.[0];
   if (!candidate) throw new AiUserError("La IA no pudo procesar este documento.", "rechazo");
   if (candidate.finishReason === FinishReason.MAX_TOKENS) {
@@ -104,7 +112,7 @@ export async function extractWithGemini(
 /**
  * Claude: salidas estructuradas y respaldo automático del servidor si el modelo principal declina.
  */
-async function extractWithClaude(files: InvoiceFileInput[], model: string): Promise<{ data: InvoiceExtraction; model: string }> {
+async function extractWithClaude(files: InvoiceFileInput[], model: string, usage?: Queryable): Promise<{ data: InvoiceExtraction; model: string }> {
   const client = new Anthropic({ timeout: 110_000, maxRetries: 1 });
   const blocks: Anthropic.Beta.BetaContentBlockParam[] = [];
   for (const f of files) {
@@ -122,14 +130,14 @@ async function extractWithClaude(files: InvoiceFileInput[], model: string): Prom
   }
   blocks.push({ type: "text", text: `${INVOICE_PROMPT}\n\nFecha de hoy (referencia): ${todayAR()}.` });
 
-  const response = await client.beta.messages.parse({
+  const response = await trackAiCall(usage, { provider: "anthropic", model, kind: "factura" }, () => client.beta.messages.parse({
     model,
     max_tokens: 16000,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     output_config: { effort: "high", format: betaZodOutputFormat(InvoiceExtractionSchema) },
     messages: [{ role: "user", content: blocks }],
-  });
+  }));
   if (response.stop_reason === "refusal") throw new AiUserError("La IA no pudo procesar este documento.", "rechazo");
   if (response.stop_reason === "max_tokens") throw new AiUserError("El comprobante es demasiado largo para leerlo de una vez.", "rechazo");
   if (!response.parsed_output) throw new AiUserError("No se pudo interpretar la respuesta de la IA.", "rechazo");

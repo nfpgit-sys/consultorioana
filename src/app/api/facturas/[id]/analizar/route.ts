@@ -25,7 +25,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     files.push({ mimeType: f.mimeType, data });
   }
   try {
-    await saveExtraction(db, id, await extractInvoice(files, ai));
+    await saveExtraction(db, id, await extractInvoice(files, ai, db));
     return Response.json({ ok: true });
   } catch (err) {
     console.error("[facturas] reintento fallido:", err);
