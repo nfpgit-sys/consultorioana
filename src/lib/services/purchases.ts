@@ -6,6 +6,7 @@ import { toDecimalString, toNumber, toNumberOrNull } from "@/lib/domain/numbers"
 import { type BaseUnit, round2, round3, toBaseQuantity } from "@/lib/domain/units";
 import { type ActionContext, audit, withOperation } from "./context";
 import { DOC_TYPES, type DocType } from "./documents-types";
+import { sameFileRegisteredWarning } from "./duplicate-files";
 import { DomainError, NotFoundError, translateDbError } from "./errors";
 import { ConfirmationRequiredError } from "./movements";
 import { type LockedProduct, lockProductsForStock } from "./products";
@@ -241,6 +242,9 @@ export async function planPurchase(q: Queryable, input: PurchaseInput, locked?: 
       });
     }
   }
+
+  const sameFile = await sameFileRegisteredWarning(q, input.documentId);
+  if (sameFile) warnings.push(sameFile);
 
   return { ok: errors.length === 0, errors, warnings, lines, sumLines, total, status, supplier };
 }

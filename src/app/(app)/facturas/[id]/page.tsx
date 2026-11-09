@@ -11,7 +11,7 @@ import { getAiConfig } from "@/lib/config";
 import { formatDateTime } from "@/lib/domain/format";
 import { buildReview } from "@/lib/invoices/review";
 import { loadData } from "@/lib/server/load";
-import { getDocument } from "@/lib/services/documents";
+import { findSameFiles, getDocument } from "@/lib/services/documents";
 import { listExpenseCategories } from "@/lib/services/expenses";
 import { listCategories, listProducts, SUGGESTED_CATEGORIES } from "@/lib/services/products";
 import { listSuppliers } from "@/lib/services/suppliers";
@@ -23,18 +23,19 @@ export default async function FacturaPage({ params }: { params: Promise<{ id: st
   const loaded = await loadData(async (db) => {
     const doc = await getDocument(db, id);
     if (!doc) return null;
-    const [review, products, suppliers, categories, expenseCategories] = await Promise.all([
+    const [review, sameFile, products, suppliers, categories, expenseCategories] = await Promise.all([
       doc.status === "analizado" ? buildReview(db, doc) : Promise.resolve(null),
+      findSameFiles(db, doc.id),
       listProducts(db),
       listSuppliers(db),
       listCategories(db),
       listExpenseCategories(db),
     ]);
-    return { doc, review, products, suppliers, categories, expenseCategories };
+    return { doc, review, sameFile, products, suppliers, categories, expenseCategories };
   });
   if (!loaded.ok) return <SystemErrorCard error={loaded.error} />;
   if (!loaded.data) notFound();
-  const { doc, review, products, suppliers, categories, expenseCategories } = loaded.data;
+  const { doc, review, sameFile, products, suppliers, categories, expenseCategories } = loaded.data;
   const ai = getAiConfig();
   const stored = doc.files.filter((f) => f.storage !== "none");
 
@@ -103,6 +104,7 @@ export default async function FacturaPage({ params }: { params: Promise<{ id: st
               <InvoiceReview
                 documentId={doc.id}
                 review={review}
+                sameFile={sameFile}
                 products={products}
                 suppliers={suppliers}
                 categories={[...new Set([...categories, ...SUGGESTED_CATEGORIES])].sort((a, b) => a.localeCompare(b, "es"))}

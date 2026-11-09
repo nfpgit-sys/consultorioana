@@ -15,6 +15,7 @@ import {
 } from "./proposals";
 import { consumptionSummary, expiringSoon, loadCatalog, lowStock, recentMovements, searchCatalog, spendingSummary, supplierSearch } from "./queries";
 import { normalizeText } from "@/lib/domain/normalize";
+import { statedMovementKinds } from "./intent";
 import { parseItems } from "./local";
 import { isStatedEquivalence, statedPresentationQuantities } from "./stated-numbers";
 import type { Proposal } from "./types";
@@ -35,7 +36,7 @@ Qué hacés:
 Reglas:
 1. Antes de proponer una operación sobre un producto, buscalo con buscar_productos y usá su producto_id exacto. Si la «búsqueda previa del sistema» ya lo resolvió (resolucion "resuelto"), usá ese producto_id directamente sin volver a buscarlo. Nunca inventes productos, ids, cantidades, precios ni proveedores.
 2. Si la búsqueda devuelve varios productos posibles (resolucion "ambiguo") o coincidencias dudosas, preguntá cuál es, listando las opciones con su stock. Si no existe, decilo. Si la persona pidió agregar o comprar un producto que no existe, proponé crearlo con proponer_producto: nombre tal como lo dijo, unidad base adecuada (unidad, salvo que hable de gramos, mililitros, etc.), stock inicial = la cantidad indicada, sin inventar categoría, costo ni stock mínimo.
-3. Consumos ("gasté", "usamos", "se usaron", "consumimos") descuentan stock: tipo "consumo". Ingresos sin compra ("agregá", "sumá", "llegaron", "nos regalaron") suman: tipo "ingreso". Compras ("compramos", "compré") van con proponer_compra.
+3. Consumos ("gasté", "usamos", "se usaron", "consumimos") descuentan stock: tipo "consumo". Si el mensaje no dice si algo se usó o entró (por ejemplo «jeringas 5»), preguntá; nunca supongas que es un consumo. Ingresos sin compra ("agregá", "sumá", "llegaron", "nos regalaron") suman: tipo "ingreso". Compras ("compramos", "compré") van con proponer_compra.
 4. En una compra, si no te dieron el importe, preguntá una vez cuánto se pagó y a qué proveedor. Si responden que no saben o "después", proponé la compra sin importe: queda pendiente de precio.
 5. Unidades: usá la unidad que dijo la persona (por ejemplo "cajas"). Solo existen las conversiones físicas (g/kg/mg, ml/l, cm/m) y las presentaciones definidas en el producto (las ves en buscar_productos). Si la persona usa una presentación que no está definida, preguntá cuántas unidades base trae y esperá la respuesta: en ese mensaje no prepares ninguna tarjeta. Recién cuando la persona diga el número, prepará la presentación con proponer_presentacion y avisá que, cuando la confirme, se puede registrar la operación: la operación con esa presentación no se puede preparar antes de confirmarla. Para un producto NUEVO es distinto: las presentaciones van dentro de proponer_producto y el stock inicial se carga ahí mismo, convertido a unidades base (2 cajas de 100 = 200). Nunca supongas una equivalencia (tampoco 1) ni uses la cantidad pedida («2 cajas») como equivalencia: el servidor rechaza cualquier equivalencia que la persona no haya dicho.
 6. Si algo es ambiguo (producto, cantidad, unidad, fecha, si fue consumo o ingreso), preguntá antes de proponer. Una pregunta concreta por vez.
@@ -274,6 +275,20 @@ export async function executeTool(
     case "proponer_movimientos": {
       const items = Array.isArray(input.movimientos) ? (input.movimientos as ToolInput[]) : [];
       if (!items.length) return fail("No hay movimientos.");
+      // La persona tiene que haber dicho si se usó o si entró (ante «jeringas 5» hay que preguntar).
+      const said = statedMovementKinds(ctx.userTexts.slice(-2));
+      const unclear = [...new Set(items.map((m) => (m.tipo === "ingreso" ? "ingreso" : "consumo")))].filter((k) => !said.has(k));
+      if (unclear.length) {
+        return {
+          content: JSON.stringify({
+            estado: "no_valida",
+            errores: [
+              `La persona no dijo que fuera un ${unclear.join(" ni un ")}. Preguntale si se usó (consumo) o si entró (ingreso) y no prepares la tarjeta hasta que lo diga; no lo supongas.`,
+            ],
+          }),
+          isError: true,
+        };
+      }
       const fecha = dateOr(input.fecha, null);
       const planned = await proposeMovements(q, {
           items: items.map((m) => ({
