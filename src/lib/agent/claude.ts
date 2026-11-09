@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Queryable } from "@/lib/db/types";
-import { dateContext, executeTool, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput } from "./tools";
+import { dateContext, executeTool, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
 import type { AssistantMessage, AssistantReply, Proposal } from "./types";
 
 /** Herramientas en el formato de Claude (esquemas estrictos). */
@@ -27,6 +27,7 @@ export async function runClaudeAssistant(q: Queryable, history: AssistantMessage
   const messages: Anthropic.MessageParam[] = history.slice(-12).map((m) => ({ role: m.role, content: m.content }));
   while (messages.length && messages[0].role !== "user") messages.shift();
   const proposals: Proposal[] = [];
+  const toolCtx = { userTexts: userTextsOf(history) };
   const system: Anthropic.TextBlockParam[] = [
     { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
     { type: "text", text: dateContext() },
@@ -64,7 +65,7 @@ export async function runClaudeAssistant(q: Queryable, history: AssistantMessage
     for (const use of toolUses) {
       let result: { content: string; isError: boolean };
       try {
-        result = await executeTool(q, use.name, (use.input ?? {}) as ToolInput, proposals);
+        result = await executeTool(q, use.name, (use.input ?? {}) as ToolInput, proposals, toolCtx);
       } catch (err) {
         console.error("[asistente] error en herramienta", use.name, err);
         result = { content: JSON.stringify({ error: "Error interno al ejecutar la consulta." }), isError: true };
