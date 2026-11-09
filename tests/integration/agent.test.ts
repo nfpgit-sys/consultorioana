@@ -500,3 +500,39 @@ describe("equivalencias inventadas por la IA (error 1 de la auditoría)", () => 
     expect(r2.proposals).toHaveLength(0);
   });
 });
+
+describe("presentación nueva y operación en el mismo pedido", () => {
+  it("prepara la presentación y avisa al modelo que la operación espera la confirmación", async () => {
+    const client = scriptedGemini([
+      () =>
+        geminiResponse([
+          { functionCall: { id: "a", name: "proponer_presentacion", args: { producto_id: ids.guantesS, nombre: "caja", equivale: 50 } } },
+          {
+            functionCall: {
+              id: "b",
+              name: "proponer_movimientos",
+              args: { movimientos: [{ producto_id: ids.guantesS, cantidad: 1, unidad: "cajas", tipo: "consumo", motivo: null }], fecha: null },
+            },
+          },
+        ]),
+      (contents) => {
+        const parts = contents[contents.length - 1].parts!;
+        expect(parts[0].functionResponse!.response).toHaveProperty("output");
+        const mov = JSON.stringify(parts[1].functionResponse!.response);
+        expect(mov).toContain("todavía no está confirmada");
+        expect(mov).toContain("No digas que preparaste la operación");
+        return geminiResponse([{ text: "Preparé la caja de 50. Confirmala y después te preparo el consumo." }]);
+      },
+    ]);
+    const r = await runGeminiAssistant(
+      db,
+      [
+        { role: "user", content: "usamos 1 caja de guantes de nitrilo" },
+        { role: "assistant", content: "¿Cuántas unidades trae cada caja?" },
+        { role: "user", content: "trae 50" },
+      ],
+      { model: "x", client },
+    );
+    expect(r.proposals.map((p) => p.type)).toEqual(["presentacion"]);
+  });
+});
