@@ -34,6 +34,14 @@
     @apply bg-canvas text-ink antialiased;
     font-feature-settings: "tnum" 1;
   }
+  /*
+   * Los hijos de una grilla pueden achicarse por debajo del ancho de su contenido.
+   * Sin esto, en el celular un texto largo recortado con «…» (truncate) estira la
+   * columna y empuja las tarjetas fuera de la pantalla (error 5 de la auditoría).
+   */
+  .grid > * {
+    min-width: 0;
+  }
   /* Evita el zoom automático de iOS al enfocar campos (requiere >=16px). */
   input,
   select,

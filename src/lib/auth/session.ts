@@ -93,3 +93,48 @@ export function sanitizeActorName(value: string | null | undefined): string | nu
   const cleaned = value.replace(/[\u0000-\u001f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
   return cleaned || null;
 }
+
+/* ------------------------------ Dispositivo de confianza ------------------------------ */
+
+/**
+ * Cookie que marca un navegador que ya ingresó con la clave correcta. No da acceso: solo
+ * sirve para que sus errores de clave cuenten aparte y no lo bloqueen los errores de otros.
+ */
+export const DEVICE_COOKIE = "cia_dispositivo";
+export const DEVICE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
+
+interface DevicePayload {
+  v: 1;
+  t: "dispositivo";
+  id: string;
+  exp: number;
+}
+
+export async function createDeviceToken(cfg: SessionConfig, now = Date.now()): Promise<{ token: string; id: string }> {
+  const id = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  const payload: DevicePayload = { v: 1, t: "dispositivo", id, exp: Math.floor(now / 1000) + DEVICE_MAX_AGE_SECONDS };
+  const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", await keyFor(cfg), encoder.encode(`dispositivo.${body}`)));
+  return { token: `${body}.${toBase64Url(signature)}`, id };
+}
+
+/** Devuelve el identificador del dispositivo si la cookie es auténtica y vigente; si no, null. */
+export async function verifyDeviceToken(token: string | undefined | null, cfg: SessionConfig, now = Date.now()): Promise<string | null> {
+  if (!token || token.length > 512) return null;
+  const [body, signature, extra] = token.split(".");
+  if (!body || !signature || extra !== undefined) return null;
+  try {
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      await keyFor(cfg),
+      fromBase64Url(signature) as Uint8Array<ArrayBuffer>,
+      encoder.encode(`dispositivo.${body}`),
+    );
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(body))) as DevicePayload;
+    if (payload.v !== 1 || payload.t !== "dispositivo" || typeof payload.id !== "string" || payload.exp * 1000 < now) return null;
+    return payload.id;
+  } catch {
+    return null;
+  }
+}
