@@ -67,8 +67,8 @@ export function ExpensesView({
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{e.description}</p>
                     <p className="truncate text-sm text-muted">
-                      {formatDate(e.expenseDate)} · {e.category}
-                      {e.supplierName ? ` · ${e.supplierName}` : ""} · #{e.number}
+                      #{e.number} · {formatDate(e.expenseDate)} · {e.category}
+                      {e.supplierName ? ` · ${e.supplierName}` : ""}
                       {e.source !== "manual" ? ` · ${e.source === "factura" ? "desde factura" : "asistente"}` : ""}
                     </p>
                     {e.status === "anulado" && <p className="text-xs text-muted">Anulado: {e.voidReason}</p>}

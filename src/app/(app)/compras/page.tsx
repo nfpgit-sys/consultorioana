@@ -100,9 +100,9 @@ export default async function ComprasPage({ searchParams }: { searchParams: Prom
                     <li key={c.id}>
                       <Link href={`/compras/${c.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 sm:px-5">
                         <div className="min-w-0">
-                          <p className="truncate font-medium">
-                            {c.supplierName ?? "Sin proveedor"}{" "}
-                            <span className="font-normal text-muted">#{c.number}</span>
+                          <p className="flex min-w-0 gap-1.5 font-medium">
+                            <span className="truncate">{c.supplierName ?? "Sin proveedor"}</span>
+                            <span className="shrink-0 font-normal text-muted">#{c.number}</span>
                           </p>
                           <p className="truncate text-sm text-muted">
                             {formatDate(c.purchaseDate)} · {c.itemCount} línea{c.itemCount === 1 ? "" : "s"}

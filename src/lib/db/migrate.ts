@@ -1,6 +1,7 @@
 import type { Database } from "./types";
 import { sql as m0001 } from "./migrations/0001_esquema_inicial";
 import { sql as m0002 } from "./migrations/0002_uso_ia";
+import { sql as m0003 } from "./migrations/0003_dispositivos";
 
 export interface Migration {
   version: string;
@@ -11,6 +12,7 @@ export interface Migration {
 export const MIGRATIONS: Migration[] = [
   { version: "0001_esquema_inicial", sql: m0001 },
   { version: "0002_uso_ia", sql: m0002 },
+  { version: "0003_dispositivos", sql: m0003 },
 ];
 
 /** Clave del lock consultivo que serializa migraciones entre instancias concurrentes. */
