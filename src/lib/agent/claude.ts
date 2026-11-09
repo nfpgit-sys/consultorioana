@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Queryable } from "@/lib/db/types";
-import { dateContext, executeTool, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
+import { trackAiCall } from "@/lib/services/ai-usage";
+import { closingReply, dateContext, executeTool, prefetchContext, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
 import type { AssistantMessage, AssistantReply, Proposal } from "./types";
 
 /** Herramientas en el formato de Claude (esquemas estrictos). */
@@ -32,16 +33,19 @@ export async function runClaudeAssistant(q: Queryable, history: AssistantMessage
     { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
     { type: "text", text: dateContext() },
   ];
+  const prefetched = await prefetchContext(q, history);
+  if (prefetched) system.push({ type: "text", text: prefetched });
+  const tag = { provider: "anthropic", model: opts.model, kind: "asistente" as const };
 
   for (let i = 0; i < (opts.maxIterations ?? 8); i++) {
-    const response = await client.messages.create({
+    const response = await trackAiCall(q, tag, () => client.messages.create({
       model: opts.model,
       max_tokens: 8000,
       system,
       tools: TOOLS,
       messages,
       output_config: { effort: "medium" },
-    });
+    }));
 
     if (response.stop_reason === "refusal") {
       return { reply: "No puedo ayudar con ese pedido. Puedo ayudarte con el inventario, las compras y los gastos del consultorio.", proposals, mode: "ia" };
@@ -62,6 +66,7 @@ export async function runClaudeAssistant(q: Queryable, history: AssistantMessage
 
     messages.push({ role: "assistant", content: response.content as Anthropic.ContentBlockParam[] });
     const results: Anthropic.ToolResultBlockParam[] = [];
+    let allProposalsOk = true;
     for (const use of toolUses) {
       let result: { content: string; isError: boolean };
       try {
@@ -70,8 +75,11 @@ export async function runClaudeAssistant(q: Queryable, history: AssistantMessage
         console.error("[asistente] error en herramienta", use.name, err);
         result = { content: JSON.stringify({ error: "Error interno al ejecutar la consulta." }), isError: true };
       }
+      if (!use.name.startsWith("proponer_") || result.isError) allProposalsOk = false;
       results.push({ type: "tool_result", tool_use_id: use.id, content: result.content, is_error: result.isError });
     }
+    // Si solo se prepararon tarjetas y todas salieron bien, el cierre lo redacta el servidor (una consulta menos).
+    if (allProposalsOk && proposals.length > 0) return { reply: closingReply(proposals, text), proposals, mode: "ia" };
     messages.push({ role: "user", content: results });
   }
   return {

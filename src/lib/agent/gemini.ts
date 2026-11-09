@@ -10,7 +10,8 @@ import {
 } from "@google/genai";
 import { toGeminiSchema } from "@/lib/ai/gemini-schema";
 import type { Queryable } from "@/lib/db/types";
-import { dateContext, executeTool, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
+import { trackAiCall } from "@/lib/services/ai-usage";
+import { closingReply, dateContext, executeTool, prefetchContext, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
 import type { AssistantMessage, AssistantReply, Proposal } from "./types";
 
 /** Herramientas en el formato de Gemini. Las que no tienen parámetros van sin esquema (Gemini lo exige). */
@@ -70,12 +71,14 @@ export async function runGeminiAssistant(q: Queryable, history: AssistantMessage
   const client = opts.client ?? createGeminiClient(opts.apiKey ?? "");
   const contents = toContents(history);
   const proposals: Proposal[] = [];
-  const systemInstruction = `${SYSTEM_PROMPT}\n\n${dateContext()}`;
+  const prefetched = await prefetchContext(q, history);
+  const systemInstruction = [SYSTEM_PROMPT, dateContext(), prefetched].filter(Boolean).join("\n\n");
+  const tag = { provider: "gemini", model: opts.model, kind: "asistente" as const };
   let malformedRetries = 0;
   const toolCtx = { userTexts: userTextsOf(history) };
 
   for (let i = 0; i < (opts.maxIterations ?? 8); i++) {
-    const response = await client.models.generateContent({
+    const response = await trackAiCall(q, tag, () => client.models.generateContent({
       model: opts.model,
       contents,
       config: {
@@ -88,7 +91,7 @@ export async function runGeminiAssistant(q: Queryable, history: AssistantMessage
         // Sin reintentos ante 429: si se agotó el cupo gratuito, se responde enseguida con el modo básico.
         httpOptions: { timeout: 40_000, retryOptions: { attempts: 2, initialDelay: 1, maxDelay: 4, httpStatusCodes: [500, 502, 503, 504] } },
       },
-    });
+    }));
 
     const candidate = response.candidates?.[0];
     if (!candidate) {
@@ -122,6 +125,7 @@ export async function runGeminiAssistant(q: Queryable, history: AssistantMessage
     // Se devuelve el contenido del modelo tal cual (incluye las firmas de pensamiento que Gemini exige).
     contents.push({ role: "model", parts });
     const responses: Part[] = [];
+    let allProposalsOk = true;
     for (const part of calls) {
       const call = part.functionCall!;
       const name = call.name ?? "";
@@ -132,11 +136,14 @@ export async function runGeminiAssistant(q: Queryable, history: AssistantMessage
         console.error("[asistente] error en herramienta", name, err);
         result = { content: JSON.stringify({ error: "Error interno al ejecutar la consulta." }), isError: true };
       }
+      if (!name.startsWith("proponer_") || result.isError) allProposalsOk = false;
       const payload = parseToolContent(result.content);
       responses.push({
         functionResponse: { ...(call.id ? { id: call.id } : {}), name, response: result.isError ? { error: payload } : { output: payload } },
       });
     }
+    // Si solo se prepararon tarjetas y todas salieron bien, el cierre lo redacta el servidor (una consulta menos).
+    if (allProposalsOk && proposals.length > 0) return { reply: closingReply(proposals, text), proposals, mode: "ia" };
     contents.push({ role: "user", parts: responses });
   }
   return {

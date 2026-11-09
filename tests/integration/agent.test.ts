@@ -202,11 +202,12 @@ describe("agente con Claude (cliente simulado)", () => {
       },
     ]);
     const r = await runClaudeAssistant(db, [{ role: "user", content: "hoy gasté 3 jeringas" }], { model: "claude-haiku-5-5", client });
-    expect(client.calls).toBe(3);
+    // La tercera consulta (solo para redactar el cierre) ya no se hace: el servidor cierra.
+    expect(client.calls).toBe(2);
     expect(r.mode).toBe("ia");
     expect(r.proposals).toHaveLength(1);
     expect(r.proposals[0].type).toBe("movimientos");
-    expect(r.reply).toContain("Confirmalo");
+    expect(r.reply).toContain("confirmala en la tarjeta");
     expect((await getProduct(db, ids.jeringa))?.currentStock).toBe(5);
   });
 
@@ -309,7 +310,7 @@ describe("agente con Gemini (cliente simulado)", () => {
       },
     ]);
     const r = await runGeminiAssistant(db, [{ role: "user", content: "hoy gasté 3 jeringas" }], { model: "gemini-flash-lite-latest", client });
-    expect(client.calls).toHaveLength(3);
+    expect(client.calls).toHaveLength(2);
     const config = client.calls[0].config!;
     expect(config.tools![0]).toHaveProperty("functionDeclarations");
     expect(String(config.systemInstruction)).toContain("consultorIA");
@@ -318,7 +319,7 @@ describe("agente con Gemini (cliente simulado)", () => {
     expect(r).toMatchObject({ mode: "ia" });
     expect(r.proposals).toHaveLength(1);
     expect(r.proposals[0].type).toBe("movimientos");
-    expect(r.reply).toContain("Confirmalo");
+    expect(r.reply).toContain("confirmala en la tarjeta");
     expect((await getProduct(db, ids.jeringa))?.currentStock).toBe(5);
   });
 
@@ -560,5 +561,94 @@ describe("stock inicial de un producto nuevo con presentación", () => {
     const r = await runGeminiAssistant(db, [{ role: "user", content: "Agregá dos cajas de guantes de vinilo, cada caja tiene 100 unidades" }], { model: "x", client });
     expect(r.proposals).toHaveLength(1);
     expect(r.proposals[0]).toMatchObject({ type: "producto", input: { initialStock: 200 } });
+  });
+});
+
+describe("menos consultas por pedido (error 2 de la auditoría)", () => {
+  it("con la búsqueda previa, «hoy gasté 3 jeringas descartables 5 ml» se resuelve en UNA consulta", async () => {
+    let jeringaId = "";
+    const client = scriptedGemini([
+      (_contents, params) => {
+        const sys = String(params.config?.systemInstruction);
+        expect(sys).toContain("Búsqueda previa del sistema");
+        const json = JSON.parse(sys.slice(sys.indexOf("[")));
+        expect(json[0]).toMatchObject({ frase: expect.stringContaining("jeringa"), resolucion: "resuelto" });
+        jeringaId = json[0].coincidencias[0].producto_id;
+        return geminiResponse([
+          {
+            functionCall: {
+              name: "proponer_movimientos",
+              args: { movimientos: [{ producto_id: jeringaId, cantidad: 3, unidad: null, tipo: "consumo", motivo: null }], fecha: null },
+            },
+          },
+        ]);
+      },
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "hoy gasté 3 jeringas descartables 5 ml" }], { model: "x", client });
+    expect(client.calls).toHaveLength(1);
+    expect(jeringaId).toBe(ids.jeringa);
+    expect(r.proposals).toHaveLength(1);
+    expect(r.reply).toContain("revisala y confirmala");
+  });
+
+  it("si la búsqueda previa es ambigua, el modelo la ve y puede preguntar sin otra consulta", async () => {
+    const client = scriptedGemini([
+      (_contents, params) => {
+        expect(String(params.config?.systemInstruction)).toContain('"resolucion":"ambiguo"');
+        return geminiResponse([{ text: "¿De látex talle M o de nitrilo talle S?" }]);
+      },
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "usamos 2 guantes" }], { model: "x", client });
+    expect(client.calls).toHaveLength(1);
+    expect(r.reply).toContain("¿De látex");
+  });
+
+  it("una consulta sin cantidades no lleva búsqueda previa", async () => {
+    const client = scriptedGemini([
+      (_contents, params) => {
+        expect(String(params.config?.systemInstruction)).not.toContain("Búsqueda previa");
+        return geminiResponse([{ text: "Listo." }]);
+      },
+    ]);
+    await runGeminiAssistant(db, [{ role: "user", content: "¿Qué productos están por agotarse?" }], { model: "x", client });
+  });
+
+  it("si una propuesta falla, el modelo sí recibe el error para explicarlo (no cierra el servidor)", async () => {
+    const client = scriptedGemini([
+      () =>
+        geminiResponse([
+          {
+            functionCall: {
+              name: "proponer_movimientos",
+              args: { movimientos: [{ producto_id: ids.jeringa, cantidad: 999, unidad: null, tipo: "consumo", motivo: null }], fecha: null },
+            },
+          },
+        ]),
+      () => geminiResponse([{ text: "No alcanza el stock: hay 5 jeringas." }]),
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "gasté 999 jeringas descartables 5 ml" }], { model: "x", client });
+    expect(client.calls).toHaveLength(2);
+    expect(r.reply).toContain("No alcanza");
+  });
+
+  it("registra cada consulta en el contador de uso, incluidas las rechazadas por límite", async () => {
+    const { aiUsageSummary } = await import("@/lib/services/ai-usage");
+    const before = (await aiUsageSummary(db)).today;
+    const ok = scriptedGemini([() => geminiResponse([{ text: "Listo." }])]);
+    await runGeminiAssistant(db, [{ role: "user", content: "hola" }], { model: "modelo-prueba", client: ok });
+    const limited: GeminiClient = {
+      models: {
+        async generateContent() {
+          throw new ApiError({ status: 429, message: "{}" });
+        },
+      },
+    };
+    await expect(runGeminiAssistant(db, [{ role: "user", content: "hola" }], { model: "modelo-prueba", client: limited })).rejects.toThrow();
+    const after = (await aiUsageSummary(db)).today;
+    expect(after.requests - before.requests).toBe(2);
+    expect(after.limited - before.limited).toBe(1);
+    expect(after.peakPerMinute).toBeGreaterThanOrEqual(2);
+    const rows = await db.query<{ kind: string; model: string }>("select kind, model from ai_usage where model = 'modelo-prueba'");
+    expect(rows.every((r) => r.kind === "asistente")).toBe(true);
   });
 });
