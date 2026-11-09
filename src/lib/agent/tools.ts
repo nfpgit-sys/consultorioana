@@ -17,7 +17,7 @@ import { consumptionSummary, expiringSoon, loadCatalog, lowStock, recentMovement
 import { normalizeText } from "@/lib/domain/normalize";
 import { statedMovementKinds } from "./intent";
 import { parseItems } from "./local";
-import { isStatedEquivalence, statedPresentationQuantities } from "./stated-numbers";
+import { isAffirmative, isStatedEquivalence, offeredEquivalenceNumbers, statedPresentationQuantities } from "./stated-numbers";
 import type { Proposal } from "./types";
 
 /**
@@ -196,6 +196,23 @@ export type ToolInput = Record<string, unknown>;
 export interface ToolContext {
   /** Últimos mensajes escritos o dictados por la persona. */
   userTexts: string[];
+  /** Último mensaje del asistente (para aceptar un «sí» a una equivalencia que él ofreció). */
+  lastAssistantText?: string;
+}
+
+/** Contexto de validación a partir del historial de la conversación. */
+export function toolContextOf(history: { role: string; content: string }[]): ToolContext {
+  return {
+    userTexts: userTextsOf(history),
+    lastAssistantText: [...history].reverse().find((m) => m.role === "assistant")?.content ?? "",
+  };
+}
+
+/** La persona dijo la equivalencia, o respondió «sí» a la que ofreció el asistente en su último mensaje. */
+function equivalenceAccepted(ctx: ToolContext, name: string, factor: number): boolean {
+  if (isStatedEquivalence(ctx.userTexts, name, factor)) return true;
+  const lastUser = ctx.userTexts[ctx.userTexts.length - 1] ?? "";
+  return isAffirmative(lastUser) && offeredEquivalenceNumbers(ctx.lastAssistantText ?? "", name).some((n) => Math.abs(n - factor) < 1e-9);
 }
 
 /** Últimos mensajes de la persona, para validar datos que solo ella puede aportar. */
@@ -362,7 +379,7 @@ export async function executeTool(
       for (const p of Array.isArray(input.presentaciones) ? (input.presentaciones as ToolInput[]) : []) {
         const pname = str(p.nombre) ?? "";
         const factor = num(p.equivale) ?? 0;
-        if (pname && !isStatedEquivalence(ctx.userTexts, pname, factor)) return unstatedEquivalence(pname, factor);
+        if (pname && !equivalenceAccepted(ctx, pname, factor)) return unstatedEquivalence(pname, factor);
         // Stock inicial cargado en cajas en lugar de unidades base ("2 cajas de 100" -> 2 en vez de 200).
         const initial = num(input.stock_inicial) ?? 0;
         const said = statedPresentationQuantities(ctx.userTexts, pname);
@@ -407,7 +424,7 @@ export async function executeTool(
     case "proponer_presentacion": {
       const pname = str(input.nombre) ?? "";
       const factor = num(input.equivale) ?? 0;
-      if (pname && !isStatedEquivalence(ctx.userTexts, pname, factor)) return unstatedEquivalence(pname, factor);
+      if (pname && !equivalenceAccepted(ctx, pname, factor)) return unstatedEquivalence(pname, factor);
       return finishProposal(
         await proposePresentation(q, { productId: str(input.producto_id) ?? "", name: str(input.nombre) ?? "", factor: num(input.equivale) ?? 0 }),
       );

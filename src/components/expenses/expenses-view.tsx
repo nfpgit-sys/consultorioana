@@ -74,7 +74,7 @@ export function ExpensesView({
                     {e.status === "anulado" && <p className="text-xs text-muted">Anulado: {e.voidReason}</p>}
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className={`tabular font-semibold ${e.status === "anulado" ? "text-slate-400 line-through" : ""}`}>{formatARS(e.amount)}</p>
+                    <p className={`tabular font-semibold ${e.status === "anulado" ? "text-slate-500 line-through" : ""}`}>{formatARS(e.amount)}</p>
                     {e.status === "anulado" ? (
                       <Badge>Anulado</Badge>
                     ) : (

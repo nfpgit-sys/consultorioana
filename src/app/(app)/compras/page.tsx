@@ -112,7 +112,7 @@ export default async function ComprasPage({ searchParams }: { searchParams: Prom
                           </p>
                         </div>
                         <div className="shrink-0 text-right">
-                          <p className={`tabular font-semibold ${c.status === "anulada" ? "text-slate-400 line-through" : ""}`}>
+                          <p className={`tabular font-semibold ${c.status === "anulada" ? "text-slate-500 line-through" : ""}`}>
                             {c.total !== null ? formatARS(c.total) : "—"}
                           </p>
                           {c.status !== "registrada" && <Badge tone={STATUS[c.status].tone}>{STATUS[c.status].label}</Badge>}

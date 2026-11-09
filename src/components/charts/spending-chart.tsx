@@ -93,7 +93,7 @@ export function SpendingChart({ data, height = 220 }: { data: SpendingPoint[]; h
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="h-auto w-full"
-          role="img"
+          role="group"
           aria-label={`Evolución mensual de gastos de los últimos ${data.length} meses`}
           onPointerLeave={() => setHover(null)}
         >
@@ -181,7 +181,7 @@ export function SpendingChart({ data, height = 220 }: { data: SpendingPoint[]; h
           </div>
         )}
       </div>
-      <button type="button" onClick={() => setShowTable((s) => !s)} className="mt-2 text-sm font-medium text-brand-700 hover:underline">
+      <button type="button" onClick={() => setShowTable((s) => !s)} className="mt-2 inline-flex min-h-6 items-center text-sm font-medium text-brand-700 hover:underline">
         {showTable ? "Ocultar tabla" : "Ver como tabla"}
       </button>
       {showTable && (

@@ -56,7 +56,7 @@ function ShellInner({ children, info }: { children: ReactNode; info: ShellInfo }
           >
             <Sparkles className="h-5 w-5" aria-hidden />
             Asistente
-            <kbd className="ml-auto rounded-md bg-white/15 px-1.5 py-0.5 text-[0.7rem] font-medium">Ctrl K</kbd>
+            <kbd className="ml-auto rounded-md bg-black/25 px-1.5 py-0.5 text-[0.7rem] font-medium">Ctrl K</kbd>
           </button>
         </div>
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-4" aria-label="Principal">

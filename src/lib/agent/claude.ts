@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Queryable } from "@/lib/db/types";
 import { trackAiCall } from "@/lib/services/ai-usage";
-import { closingReply, dateContext, executeTool, prefetchContext, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
+import { closingReply, dateContext, executeTool, prefetchContext, SYSTEM_PROMPT, TOOL_SPECS, toolContextOf, type ToolInput } from "./tools";
 import type { AssistantMessage, AssistantReply, Proposal } from "./types";
 
 /** Herramientas en el formato de Claude (esquemas estrictos). */
@@ -28,7 +28,7 @@ export async function runClaudeAssistant(q: Queryable, history: AssistantMessage
   const messages: Anthropic.MessageParam[] = history.slice(-12).map((m) => ({ role: m.role, content: m.content }));
   while (messages.length && messages[0].role !== "user") messages.shift();
   const proposals: Proposal[] = [];
-  const toolCtx = { userTexts: userTextsOf(history) };
+  const toolCtx = toolContextOf(history);
   const system: Anthropic.TextBlockParam[] = [
     { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
     { type: "text", text: dateContext() },

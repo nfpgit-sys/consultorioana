@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,10 +14,13 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0f867b",
+  themeColor: "#0d7d73",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Todas las páginas se generan en cada pedido: así Next.js puede aplicar el nonce de la
+  // política de seguridad de contenido (CSP) que arma src/proxy.ts.
+  await connection();
   return (
     <html lang="es-AR">
       <body className="min-h-dvh">{children}</body>

@@ -90,7 +90,7 @@ export function InvoiceUpload({ aiEnabled, privacyNote = null }: { aiEnabled: bo
         >
           <Camera className="h-8 w-8" aria-hidden />
           <span className="font-medium">Sacar foto</span>
-          <span className="text-xs text-brand-800/70">Una foto por página, con buena luz y sin cortes</span>
+          <span className="text-xs text-brand-800">Una foto por página, con buena luz y sin cortes</span>
         </button>
         <button
           type="button"

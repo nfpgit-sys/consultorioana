@@ -1,11 +1,11 @@
 import type { Queryable } from "@/lib/db/types";
 import { addDays, endOfMonth, formatARS, formatQuantity, presetRange, todayAR } from "@/lib/domain/format";
 import { resolveProductQuery } from "@/lib/domain/matching";
-import { normalizeText } from "@/lib/domain/normalize";
+import { normalizeText, singularize } from "@/lib/domain/normalize";
 import { parseDecimalAR, parseNumberWords } from "@/lib/domain/numbers";
 import { type BaseUnit, COMMON_PRESENTATIONS, normalizePresentationName, resolvePhysicalUnit, toBaseQuantity } from "@/lib/domain/units";
 import { EXPENSE_CATEGORIES } from "@/lib/services/expenses";
-import { proposeExpense, proposeMovements, proposeProduct, proposePurchase, type ProposalResult } from "./proposals";
+import { proposeExpense, proposeMovements, proposePresentation, proposeProduct, proposePurchase, type ProposalResult } from "./proposals";
 import { type CatalogProduct, consumptionSummary, expiringSoon, loadCatalog, lowStock, spendingSummary } from "./queries";
 import type { AssistantReply, Proposal } from "./types";
 
@@ -56,9 +56,9 @@ export function parsePeriod(t: string, today = todayAR()): { from: string; to: s
 }
 
 const CONSUME_RE =
-  /\b(gaste|gastamos|gastaron|use|usamos|usaron|utilice|utilizamos|utilizaron|consumi|consumimos|consumieron|ocupe|ocupamos|saque|sacamos|desconta|descontar|descontame|baja de|se usaron|se uso|se gastaron|se gasto|se consumieron|se consumio)\b/;
+  /\b(gaste|gastamos|gastaron|use|usamos|usaron|utilice|utilizamos|utilizaron|consumi|consumimos|consumieron|ocupe|ocupamos|saque|sacamos|desconta|descontar|descontame|baja de|se usaron|se uso|se gastaron|se gasto|se consumieron|se consumio|se (?:nos |me )?(?:fue|fueron|acabo|acabaron|termino|terminaron)|tiramos|tire|descartamos|descarte|rompimos|se rompio|se rompieron|perdimos|aplicamos|aplique)\b/;
 const PURCHASE_RE = /\b(compre|compramos|compraron|se compro|se compraron|adquirimos)\b/;
-const ADD_RE = /\b(agrega|agregar|agregame|suma|sumar|sumale|ingresa|ingresar|carga|cargar|cargame|entraron|entro|llegaron|llego|recibimos|recibi|anota|anotar)\b/;
+const ADD_RE = /\b(agrega|agregar|agregame|suma|sumar|sumale|ingresa|ingresar|carga|cargar|cargame|entraron|entro|llegaron|llego|recibimos|recibi|anota|anotar|nos regalaron|regalaron|donaron|repusimos|repuse)\b/;
 
 const FILLER = new Set([
   "hoy",
@@ -172,7 +172,8 @@ function resolveItem(item: ParsedItem, catalog: CatalogProduct[]): Resolution {
     if (whole?.status === "resuelto") return { ok: true, product: whole.match, unit: null };
     if (r?.status === "ambiguo") return { ok: false, kind: "ambiguo", options: r.options as CatalogProduct[], phrase: item.productPhrase };
     if (whole?.status === "ambiguo") return { ok: false, kind: "ambiguo", options: whole.options as CatalogProduct[], phrase: item.rawPhrase };
-    return { ok: false, kind: "no_encontrado", phrase: item.productPhrase || item.rawPhrase, unitWord: item.unitWord };
+    const onlyMeasures = item.productPhrase.split(" ").every((w) => !w || w === "de" || /^\d/.test(w) || resolvePhysicalUnit(w) !== null);
+    return { ok: false, kind: "no_encontrado", phrase: onlyMeasures ? item.rawPhrase : item.productPhrase || item.rawPhrase, unitWord: item.unitWord };
   }
   const r = tryResolve(item.productPhrase);
   if (r?.status === "resuelto") return { ok: true, product: r.match, unit: null };
@@ -293,7 +294,10 @@ export async function runLocalAssistant(q: Queryable, rawText: string): Promise<
     const verbRe = kind === "consumo" ? CONSUME_RE : kind === "compra" ? PURCHASE_RE : ADD_RE;
     // Precio para compras: "$12.000", "por 12000 pesos", "a 1200 cada una"
     let price: { amount: number; each: boolean } | null = null;
-    let textForItems = stripVerb(t, verbRe);
+    // «…, cada caja tiene/trae 100 unidades»: equivalencia dicha por la persona.
+    const equivMatch = /,?\s*\bcada\s+([a-z]+)\s+(?:tiene|trae|viene con|contiene|es de|son|de)\s+(\d+(?:\.\d+)?)(?:\s+(?:unidades|unidad|u))?/.exec(t);
+    const equiv = equivMatch ? { name: equivMatch[1], factor: parseDecimalAR(equivMatch[2]) } : null;
+    let textForItems = stripVerb(equivMatch ? t.replace(equivMatch[0], " ") : t, verbRe);
     if (kind === "compra") {
       const raw = normalizeText(rawText.replace(/\$\s*/g, " zzprecio "));
       const m = /(?:zzprecio\s*([\d.]+)|(?:por|a|en|pagamos|pague)\s+([\d.]+)\s*(?:pesos|\$)?)(\s*(cada (una|uno)|c u|por unidad))?/.exec(raw);
@@ -308,6 +312,39 @@ export async function runLocalAssistant(q: Queryable, rawText: string): Promise<
     const catalog = await loadCatalog(q);
     const resolved = items.map((i) => ({ item: i, res: resolveItem(i, catalog) }));
     const failures = resolved.filter((r) => !r.res.ok);
+
+    if (equiv && equiv.factor && equiv.factor > 0 && items.length === 1 && items[0].unitWord && singularize(items[0].unitWord) === singularize(equiv.name)) {
+      const item = items[0];
+      const res = resolved[0].res;
+      // Producto existente sin esa presentación: primero se define la presentación.
+      if (!res.ok && res.kind === "unidad") {
+        const pres = await proposePresentation(q, { productId: res.product.id, name: equiv.name, factor: equiv.factor });
+        if (!pres.ok) return reply(pres.errors.join(" "));
+        return reply(
+          `Te preparé la presentación «1 ${equiv.name} = ${formatQuantity(equiv.factor, res.product.baseUnit)}» para «${res.product.name}». Cuando la confirmes, pedime de nuevo la operación.`,
+          [pres.proposal],
+        );
+      }
+      // Producto nuevo: se crea con la presentación y el stock en unidades.
+      if (!res.ok && res.kind === "no_encontrado" && kind === "ingreso") {
+        const name = capitalize(item.productPhrase);
+        const result = await proposeProduct(q, {
+          name,
+          category: null,
+          baseUnit: "unidad",
+          initialStock: item.quantity * equiv.factor,
+          minStock: 0,
+          unitCost: null,
+          tracksExpiry: false,
+          presentations: [{ name: equiv.name, factor: equiv.factor }],
+        });
+        if (!result.ok) return reply(result.errors.join(" "));
+        return reply(
+          `«${name}» no está en el inventario. Te propongo crearlo con ${formatQuantity(item.quantity * equiv.factor, "unidad")} (${item.quantity} × ${equiv.factor}) y la presentación «1 ${equiv.name} = ${equiv.factor} unidades». Revisá el nombre y confirmá.`,
+          [result.proposal],
+        );
+      }
+    }
 
     if (kind === "ingreso" && failures.length === 1 && items.length === 1 && failures[0].res.ok === false && failures[0].res.kind === "no_encontrado") {
       // «Agregá 20 jeringas al inventario» con un producto que no existe: se propone crearlo.

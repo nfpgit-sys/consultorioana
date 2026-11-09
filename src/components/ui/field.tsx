@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import { Children, cloneElement, type ComponentProps, isValidElement, type ReactElement, type ReactNode, useId } from "react";
 import { cn } from "./cn";
 
 const control =
@@ -21,13 +21,26 @@ export function Field({
   className?: string;
   optional?: boolean;
 }) {
+  // Si no se indica htmlFor y el campo tiene un único control, se asocia la etiqueta a ese
+  // control automáticamente (lectores de pantalla y tocar la etiqueta enfocan el campo).
+  const autoId = useId();
+  let labelFor = htmlFor;
+  let content = children;
+  if (!htmlFor) {
+    const items = Children.toArray(children);
+    const controls = items.filter(isControl);
+    if (controls.length === 1 && !(controls[0] as ReactElement<{ id?: string }>).props.id) {
+      labelFor = autoId;
+      content = items.map((child) => (child === controls[0] ? cloneElement(child as ReactElement<{ id?: string }>, { id: autoId }) : child));
+    }
+  }
   return (
     <div className={cn("space-y-1.5", className)}>
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-ink">
+      <label htmlFor={labelFor} className="block text-sm font-medium text-ink">
         {label}
         {optional && <span className="ml-1 font-normal text-muted">(opcional)</span>}
       </label>
-      {children}
+      {content}
       {error ? (
         <p className="text-sm text-rose-700" role="alert">
           {error}
@@ -66,4 +79,10 @@ export function Checkbox({ label, className, ...props }: ComponentProps<"input">
       <span>{label}</span>
     </label>
   );
+}
+
+const CONTROLS: unknown[] = ["input", "select", "textarea", Input, NumberInput, Select, Textarea];
+
+function isControl(child: unknown): boolean {
+  return isValidElement(child) && CONTROLS.includes(child.type);
 }
