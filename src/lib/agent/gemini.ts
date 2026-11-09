@@ -10,7 +10,7 @@ import {
 } from "@google/genai";
 import { toGeminiSchema } from "@/lib/ai/gemini-schema";
 import type { Queryable } from "@/lib/db/types";
-import { dateContext, executeTool, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput } from "./tools";
+import { dateContext, executeTool, SYSTEM_PROMPT, TOOL_SPECS, type ToolInput, userTextsOf } from "./tools";
 import type { AssistantMessage, AssistantReply, Proposal } from "./types";
 
 /** Herramientas en el formato de Gemini. Las que no tienen parámetros van sin esquema (Gemini lo exige). */
@@ -72,6 +72,7 @@ export async function runGeminiAssistant(q: Queryable, history: AssistantMessage
   const proposals: Proposal[] = [];
   const systemInstruction = `${SYSTEM_PROMPT}\n\n${dateContext()}`;
   let malformedRetries = 0;
+  const toolCtx = { userTexts: userTextsOf(history) };
 
   for (let i = 0; i < (opts.maxIterations ?? 8); i++) {
     const response = await client.models.generateContent({
@@ -126,7 +127,7 @@ export async function runGeminiAssistant(q: Queryable, history: AssistantMessage
       const name = call.name ?? "";
       let result: { content: string; isError: boolean };
       try {
-        result = await executeTool(q, name, (call.args ?? {}) as ToolInput, proposals);
+        result = await executeTool(q, name, (call.args ?? {}) as ToolInput, proposals, toolCtx);
       } catch (err) {
         console.error("[asistente] error en herramienta", name, err);
         result = { content: JSON.stringify({ error: "Error interno al ejecutar la consulta." }), isError: true };

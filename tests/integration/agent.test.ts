@@ -398,3 +398,105 @@ describe("agente con Gemini (cliente simulado)", () => {
     }
   });
 });
+
+describe("equivalencias inventadas por la IA (error 1 de la auditoría)", () => {
+  it("rechaza «1 caja = 1» cuando la persona solo dijo «usamos 2 cajas» y no muestra tarjeta", async () => {
+    const client = scriptedGemini([
+      () =>
+        geminiResponse([
+          { text: "¿Cuántas unidades trae una caja?" },
+          { functionCall: { id: "p1", name: "proponer_presentacion", args: { producto_id: ids.guantesS, nombre: "caja", equivale: 1 } } },
+        ]),
+      (contents) => {
+        const fr = lastFunctionResponse(contents);
+        expect(fr.response).toHaveProperty("error");
+        expect(JSON.stringify(fr.response)).toContain("no la dijo la persona");
+        return geminiResponse([{ text: "¿Cuántas unidades trae cada caja de guantes de nitrilo?" }]);
+      },
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "usamos 2 cajas de guantes de nitrilo" }], { model: "x", client });
+    expect(r.proposals).toHaveLength(0);
+    expect(r.reply).toContain("¿Cuántas unidades");
+  });
+
+  it("también rechaza usar la cantidad pedida como equivalencia (1 caja = 2)", async () => {
+    const client = scriptedGemini([
+      () => geminiResponse([{ functionCall: { name: "proponer_presentacion", args: { producto_id: ids.guantesS, nombre: "caja", equivale: 2 } } }]),
+      (contents) => {
+        expect(JSON.stringify(lastFunctionResponse(contents).response)).toContain("no la dijo la persona");
+        return geminiResponse([{ text: "¿Cuántas trae cada caja?" }]);
+      },
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "usamos 2 cajas de guantes de nitrilo" }], { model: "x", client });
+    expect(r.proposals).toHaveLength(0);
+  });
+
+  it("acepta la equivalencia cuando la persona la dijo en la respuesta", async () => {
+    const client = scriptedGemini([
+      () => geminiResponse([{ functionCall: { name: "proponer_presentacion", args: { producto_id: ids.guantesS, nombre: "caja", equivale: 50 } } }]),
+      () => geminiResponse([{ text: "Listo, preparé la presentación. Confirmala en la tarjeta." }]),
+    ]);
+    const r = await runGeminiAssistant(
+      db,
+      [
+        { role: "user", content: "usamos 2 cajas de guantes de nitrilo" },
+        { role: "assistant", content: "¿Cuántas unidades trae cada caja?" },
+        { role: "user", content: "trae 50" },
+      ],
+      { model: "x", client },
+    );
+    expect(r.proposals).toHaveLength(1);
+    expect(r.proposals[0].type).toBe("presentacion");
+  });
+
+  it("valida igual las presentaciones de un producto nuevo (y con Claude)", async () => {
+    const ok = scriptedClient([
+      () => [
+        {
+          type: "tool_use",
+          id: "t1",
+          name: "proponer_producto",
+          input: {
+            nombre: "Guantes de vinilo",
+            categoria: null,
+            unidad_base: "unidad",
+            stock_inicial: 200,
+            stock_minimo: null,
+            costo_unitario: null,
+            controla_vencimiento: false,
+            presentaciones: [{ nombre: "caja", equivale: 100 }],
+          },
+        } as unknown as Anthropic.ContentBlock,
+      ],
+      () => [{ type: "text", text: "Preparé el producto.", citations: null } as Anthropic.ContentBlock],
+    ]);
+    const r1 = await runClaudeAssistant(db, [{ role: "user", content: "Agregá dos cajas de guantes de vinilo, cada caja tiene 100 unidades" }], { model: "x", client: ok });
+    expect(r1.proposals).toHaveLength(1);
+
+    const bad = scriptedClient([
+      () => [
+        {
+          type: "tool_use",
+          id: "t1",
+          name: "proponer_producto",
+          input: {
+            nombre: "Guantes de vinilo",
+            categoria: null,
+            unidad_base: "unidad",
+            stock_inicial: 2,
+            stock_minimo: null,
+            costo_unitario: null,
+            controla_vencimiento: false,
+            presentaciones: [{ nombre: "caja", equivale: 1 }],
+          },
+        } as unknown as Anthropic.ContentBlock,
+      ],
+      (messages) => {
+        expect(lastToolResult(messages).content).toContain("no la dijo la persona");
+        return [{ type: "text", text: "¿Cuántas unidades trae cada caja?", citations: null } as Anthropic.ContentBlock];
+      },
+    ]);
+    const r2 = await runClaudeAssistant(db, [{ role: "user", content: "Agregá dos cajas de guantes de vinilo" }], { model: "x", client: bad });
+    expect(r2.proposals).toHaveLength(0);
+  });
+});

@@ -14,6 +14,7 @@ import {
   proposeReversal,
 } from "./proposals";
 import { consumptionSummary, expiringSoon, loadCatalog, lowStock, recentMovements, searchCatalog, spendingSummary, supplierSearch } from "./queries";
+import { isStatedEquivalence } from "./stated-numbers";
 import type { Proposal } from "./types";
 
 /**
@@ -34,7 +35,7 @@ Reglas:
 2. Si la búsqueda devuelve varios productos posibles (resolucion "ambiguo") o coincidencias dudosas, preguntá cuál es, listando las opciones con su stock. Si no existe, decilo. Si la persona pidió agregar o comprar un producto que no existe, proponé crearlo con proponer_producto: nombre tal como lo dijo, unidad base adecuada (unidad, salvo que hable de gramos, mililitros, etc.), stock inicial = la cantidad indicada, sin inventar categoría, costo ni stock mínimo.
 3. Consumos ("gasté", "usamos", "se usaron", "consumimos") descuentan stock: tipo "consumo". Ingresos sin compra ("agregá", "sumá", "llegaron", "nos regalaron") suman: tipo "ingreso". Compras ("compramos", "compré") van con proponer_compra.
 4. En una compra, si no te dieron el importe, preguntá una vez cuánto se pagó y a qué proveedor. Si responden que no saben o "después", proponé la compra sin importe: queda pendiente de precio.
-5. Unidades: usá la unidad que dijo la persona (por ejemplo "cajas"). Solo existen las conversiones físicas (g/kg/mg, ml/l, cm/m) y las presentaciones definidas en el producto (las ves en buscar_productos). Si la persona usa una presentación que no está definida, preguntá cuántas unidades base trae y después usá proponer_presentacion junto con la operación. Nunca supongas una equivalencia.
+5. Unidades: usá la unidad que dijo la persona (por ejemplo "cajas"). Solo existen las conversiones físicas (g/kg/mg, ml/l, cm/m) y las presentaciones definidas en el producto (las ves en buscar_productos). Si la persona usa una presentación que no está definida, preguntá cuántas unidades base trae y esperá la respuesta: en ese mensaje no prepares ninguna tarjeta. Recién cuando la persona diga el número, usá proponer_presentacion junto con la operación. Nunca supongas una equivalencia (tampoco 1) ni uses la cantidad pedida («2 cajas») como equivalencia: el servidor rechaza cualquier equivalencia que la persona no haya dicho.
 6. Si algo es ambiguo (producto, cantidad, unidad, fecha, si fue consumo o ingreso), preguntá antes de proponer. Una pregunta concreta por vez.
 7. Fechas en formato AAAA-MM-DD. Por defecto es hoy; "ayer" es el día anterior. No hay operaciones con fecha futura.
 8. Si una propuesta vuelve con error, explicá el problema con palabras simples y sugerí cómo seguir (por ejemplo, un ajuste de stock si el stock registrado no alcanza para el consumo).
@@ -188,6 +189,30 @@ export const TOOL_SPECS: ToolSpec[] = [
 
 export type ToolInput = Record<string, unknown>;
 
+/** Datos de la conversación que las herramientas necesitan para validar (no vienen del modelo). */
+export interface ToolContext {
+  /** Últimos mensajes escritos o dictados por la persona. */
+  userTexts: string[];
+}
+
+/** Últimos mensajes de la persona, para validar datos que solo ella puede aportar. */
+export function userTextsOf(history: { role: string; content: string }[], last = 4): string[] {
+  return history.filter((m) => m.role === "user").slice(-last).map((m) => m.content);
+}
+
+/** Error para el modelo cuando propone una equivalencia que la persona no dijo. */
+function unstatedEquivalence(name: string, factor: number) {
+  return {
+    content: JSON.stringify({
+      estado: "no_valida",
+      errores: [
+        `La equivalencia "1 ${name} = ${factor}" no la dijo la persona. No la supongas: preguntale cuántas unidades base trae cada ${name} y no prepares ninguna tarjeta hasta tener la respuesta.`,
+      ],
+    }),
+    isError: true,
+  };
+}
+
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const dateOr = (v: unknown, fallback: string | null): string | null => {
@@ -200,6 +225,7 @@ export async function executeTool(
   name: string,
   input: ToolInput,
   proposals: Proposal[],
+  ctx: ToolContext = { userTexts: [] },
 ): Promise<{ content: string; isError: boolean }> {
   const ok = (data: unknown) => ({ content: JSON.stringify(data), isError: false });
   const fail = (message: string) => ({ content: JSON.stringify({ error: message }), isError: true });
@@ -292,6 +318,11 @@ export async function executeTool(
       );
     case "proponer_producto": {
       const unit = str(input.unidad_base);
+      for (const p of Array.isArray(input.presentaciones) ? (input.presentaciones as ToolInput[]) : []) {
+        const pname = str(p.nombre) ?? "";
+        const factor = num(p.equivale) ?? 0;
+        if (pname && !isStatedEquivalence(ctx.userTexts, pname, factor)) return unstatedEquivalence(pname, factor);
+      }
       return finishProposal(
         await proposeProduct(q, {
           name: str(input.nombre) ?? "",
@@ -318,10 +349,14 @@ export async function executeTool(
       );
     case "proponer_reversion":
       return finishProposal(await proposeReversal(q, { movementId: str(input.movimiento_id) ?? "", reason: str(input.motivo) ?? "Corrección solicitada al asistente" }));
-    case "proponer_presentacion":
+    case "proponer_presentacion": {
+      const pname = str(input.nombre) ?? "";
+      const factor = num(input.equivale) ?? 0;
+      if (pname && !isStatedEquivalence(ctx.userTexts, pname, factor)) return unstatedEquivalence(pname, factor);
       return finishProposal(
         await proposePresentation(q, { productId: str(input.producto_id) ?? "", name: str(input.nombre) ?? "", factor: num(input.equivale) ?? 0 }),
       );
+    }
     default:
       return fail(`Herramienta desconocida: ${name}`);
   }
