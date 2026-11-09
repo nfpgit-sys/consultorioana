@@ -8,6 +8,7 @@ import { type ActionContext, audit, withOperation } from "./context";
 import { DOC_TYPES, type DocType } from "./documents-types";
 import { DomainError, NotFoundError, translateDbError } from "./errors";
 import { ConfirmationRequiredError } from "./movements";
+import { sameFileRegisteredWarning } from "./duplicate-files";
 import { normalizeDocNumber } from "./purchases";
 import { findSupplierExact, resolveOrCreateSupplier } from "./suppliers";
 import type { Warning } from "./types";
@@ -82,6 +83,8 @@ export async function planExpense(q: Queryable, input: z.output<typeof createExp
       message: `Ya hay un gasto de "${input.category}" del ${formatDate(input.expenseDate)} por ${formatARS(input.amount)} (gasto #${similar[0].number}). ¿Es otro distinto?`,
     });
   }
+  const sameFile = await sameFileRegisteredWarning(q, input.documentId);
+  if (sameFile) warnings.push(sameFile);
   return { ok: errors.length === 0, errors, warnings };
 }
 

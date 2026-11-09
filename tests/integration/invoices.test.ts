@@ -169,3 +169,53 @@ describe("revisión de facturas", () => {
     expect(review.currencyWarning).toContain("USD");
   });
 });
+
+describe("factura repetida sin lectura con IA (error 4 de la auditoría)", () => {
+  const manualDoc = async (sha: string) => {
+    const id = randomUUID();
+    await createDocument(db, [{ fileName: "factura.pdf", mimeType: "application/pdf", sizeBytes: 10, sha256: sha, storage: "none", storageKey: null }], { source: "factura" }, id);
+    return id;
+  };
+
+  it("pide confirmación al registrar otra vez el mismo archivo como compra o como gasto", async () => {
+    const { ConfirmationRequiredError } = await import("@/lib/services/movements");
+    const { createExpense } = await import("@/lib/services/expenses");
+    const { findSameFiles } = await import("@/lib/services/documents");
+    const sha = randomUUID();
+    const first = await manualDoc(sha);
+    const bought = await createPurchase(
+      db,
+      { supplierName: "Proveedor Repetido", purchaseDate: todayAR(), documentId: first, items: [{ productId: jeringa, quantity: 10, lineTotal: 1000 }] },
+      { source: "factura" },
+    );
+    expect(bought.result.status).toBe("registrada");
+
+    const second = await manualDoc(sha);
+    expect((await findSameFiles(db, second)).map((s) => s.documentId)).toContain(first);
+
+    const again = { supplierName: "Proveedor Repetido", purchaseDate: todayAR(), documentId: second, items: [{ productId: jeringa, quantity: 10, lineTotal: 1000 }] };
+    const err = await createPurchase(db, again, { source: "factura" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConfirmationRequiredError);
+    expect(JSON.stringify((err as InstanceType<typeof ConfirmationRequiredError>).details)).toContain("Este mismo archivo ya se registró");
+    const stock = (await getProduct(db, jeringa))?.currentStock;
+
+    const third = await manualDoc(sha);
+    const asExpense = { expenseDate: todayAR(), category: "Varios", description: "Misma factura", amount: 1000, documentId: third };
+    await expect(createExpense(db, asExpense, { source: "factura" })).rejects.toBeInstanceOf(ConfirmationRequiredError);
+
+    // Con confirmación explícita se puede registrar (por ejemplo, si de verdad es otra factura).
+    const ok = await createPurchase(db, { ...again, acknowledgeWarnings: true }, { source: "factura" });
+    expect(ok.result.status).toBe("registrada");
+    expect((await getProduct(db, jeringa))?.currentStock).toBe((stock ?? 0) + 10);
+  });
+
+  it("un archivo distinto no genera el aviso", async () => {
+    const doc = await manualDoc(randomUUID());
+    const out = await createPurchase(
+      db,
+      { supplierName: "Proveedor Distinto", purchaseDate: todayAR(), documentId: doc, items: [{ productId: jeringa, quantity: 1, lineTotal: 100 }] },
+      { source: "factura" },
+    );
+    expect(out.result.status).toBe("registrada");
+  });
+});

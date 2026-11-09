@@ -70,9 +70,12 @@ export function InvoiceReview({
   expenseCategories,
   canRetry,
   aiEnabled,
+  sameFile = [],
 }: {
   documentId: string;
   review: ReviewModel | null;
+  /** Otros comprobantes con exactamente el mismo archivo (se calcula siempre, con o sin IA). */
+  sameFile?: { documentId: string; number: number; status: string }[];
   products: Product[];
   suppliers: Supplier[];
   categories: string[];
@@ -207,6 +210,7 @@ export function InvoiceReview({
   };
 
   const active = kind === "compra" ? purchase : expense;
+  const repeated = review?.sameFile ?? sameFile;
 
   return (
     <div className="space-y-5">
@@ -215,9 +219,10 @@ export function InvoiceReview({
           Este proveedor ya tiene registrado el comprobante {review.docNumber} ({review.duplicate.kind} #{review.duplicate.number}). No se puede cargar dos veces.
         </Alert>
       )}
-      {review && review.sameFile.length > 0 && (
+      {repeated.length > 0 && (
         <Alert tone="warning" title="Archivo repetido">
-          Este mismo archivo ya se subió antes (comprobante{review.sameFile.length > 1 ? "s" : ""} {review.sameFile.map((s) => `#${s.number}`).join(", ")}). Revisá que no sea un duplicado.
+          Este mismo archivo ya se subió antes (comprobante{repeated.length > 1 ? "s" : ""}{" "}
+          {repeated.map((s) => `#${s.number}${s.status === "registrado" ? " ya registrado" : ""}`).join(", ")}). Revisá que no sea un duplicado.
         </Alert>
       )}
       {review?.currencyWarning && <Alert tone="warning">{review.currencyWarning}</Alert>}

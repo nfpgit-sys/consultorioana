@@ -652,3 +652,60 @@ describe("menos consultas por pedido (error 2 de la auditoría)", () => {
     expect(rows.every((r) => r.kind === "asistente")).toBe(true);
   });
 });
+
+describe("pedido sin verbo (error 3 de la auditoría)", () => {
+  const consumo = (cantidad: number) =>
+    geminiResponse([
+      {
+        functionCall: {
+          name: "proponer_movimientos",
+          args: { movimientos: [{ producto_id: ids.jeringa, cantidad, unidad: null, tipo: "consumo", motivo: null }], fecha: null },
+        },
+      },
+    ]);
+
+  it("«jeringas 5» no se convierte en un consumo: el servidor exige preguntar", async () => {
+    const client = scriptedGemini([
+      () => consumo(5),
+      (contents) => {
+        const r = JSON.stringify(lastFunctionResponse(contents).response);
+        expect(r).toContain("no dijo que fuera un consumo");
+        return geminiResponse([{ text: "¿Las usaron (consumo) o entraron al stock (ingreso)?" }]);
+      },
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "jeringas descartables 5 ml 5" }], { model: "x", client });
+    expect(r.proposals).toHaveLength(0);
+    expect(r.reply).toContain("consumo");
+  });
+
+  it("con la aclaración («las usamos») sí prepara el consumo", async () => {
+    const client = scriptedGemini([() => consumo(5)]);
+    const r = await runGeminiAssistant(
+      db,
+      [
+        { role: "user", content: "jeringas descartables 5 ml 5" },
+        { role: "assistant", content: "¿Las usaron o entraron?" },
+        { role: "user", content: "las usamos" },
+      ],
+      { model: "x", client },
+    );
+    expect(r.proposals).toHaveLength(1);
+  });
+
+  it("tampoco acepta un ingreso si la persona habló de un consumo", async () => {
+    const client = scriptedGemini([
+      () =>
+        geminiResponse([
+          {
+            functionCall: {
+              name: "proponer_movimientos",
+              args: { movimientos: [{ producto_id: ids.jeringa, cantidad: 3, unidad: null, tipo: "ingreso", motivo: null }], fecha: null },
+            },
+          },
+        ]),
+      () => geminiResponse([{ text: "Perdón, ¿fue un consumo?" }]),
+    ]);
+    const r = await runGeminiAssistant(db, [{ role: "user", content: "hoy gasté 3 jeringas" }], { model: "x", client });
+    expect(r.proposals).toHaveLength(0);
+  });
+});
