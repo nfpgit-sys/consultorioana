@@ -209,6 +209,14 @@ describe("controles de consistencia", () => {
     expect(messages).toContain("con mucha dificultad");
   });
 
+  it("el título manda sobre el tipo: «Factura de alquiler» clasificada como recibo se marca para revisar", () => {
+    const v = validateExtraction(rentalInvoice({ tipo_documento: "recibo" }), TODAY);
+    expect(v.checks).toContainEqual(expect.objectContaining({ level: "aviso", message: expect.stringContaining("se clasificó como recibo") }));
+    expect(v.doubtful).toContain("tipo_documento");
+    expect(levels(rentalInvoice()).join(" ")).not.toContain("se clasificó");
+    expect(levels(facturaA({ descripcion_comprobante: "Nota de crédito" })).join(" ")).toContain("se clasificó como factura a");
+  });
+
   it("varias facturas distintas en una misma subida", () => {
     expect(levels(rentalInvoice({ varios_comprobantes: true }))[0]).toMatch(/^error: .*comprobantes distintos/);
   });
