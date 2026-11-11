@@ -13,9 +13,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { cn } from "@/components/ui/cn";
-import { Field, Input, NumberInput, Select } from "@/components/ui/field";
+import { Field, Input, NumberInput, Select, Textarea } from "@/components/ui/field";
 import { toast } from "@/components/ui/toast";
 import type { ReviewLine, ReviewModel } from "@/lib/invoices/review";
+import { formatPeriod } from "@/lib/invoices/validate";
+import { ExtractionDetails, InvoiceChecks } from "./extraction-details";
 import { formatARS, todayAR } from "@/lib/domain/format";
 import { parseDecimalAR } from "@/lib/domain/numbers";
 import { normalizeName } from "@/lib/domain/normalize";
@@ -97,8 +99,19 @@ export function InvoiceReview({
   const [total, setTotal] = useState(fmt(review?.totals.total));
   const [category, setCategory] = useState(review?.extraction.categoria_gasto_sugerida ?? "");
   const [expenseDescription, setExpenseDescription] = useState(
-    review ? [review.extraction.proveedor_nombre, review.lines.map((l) => l.normalizedName ?? l.description).join(", ")].filter(Boolean).join(" · ").slice(0, 300) : "",
+    review
+      ? [
+          review.extraction.proveedor_nombre,
+          review.lines.map((l) => l.normalizedName ?? l.description).join(", "),
+          review.extraction.periodo ? `Período ${formatPeriod(review.extraction.periodo)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+          .slice(0, 300)
+      : "",
   );
+  const [notes, setNotes] = useState(review?.notes ?? "");
+  const doubtful = new Set(review?.doubtful ?? []);
   const [creatingFor, setCreatingFor] = useState<LineState | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [retrying, startRetry] = useTransition();
@@ -170,6 +183,7 @@ export function InvoiceReview({
         supplierCuit: existingSupplier ? null : supplierCuit || null,
         docType: docType || null,
         docNumber: docNumber || null,
+        notes: notes.trim() || null,
       });
       return;
     }
@@ -206,6 +220,7 @@ export function InvoiceReview({
       taxAmount: taxAmount || null,
       otherTaxes: otherTaxes || null,
       total: total || null,
+      notes: notes.trim() || null,
     });
   };
 
@@ -231,6 +246,8 @@ export function InvoiceReview({
           {review.extraction.observaciones ?? "Parte del comprobante no se leyó con claridad. Revisá cada dato."}
         </Alert>
       )}
+      {review && <InvoiceChecks checks={review.checks} />}
+      {review && <ExtractionDetails extraction={review.extraction} doubtful={review.doubtful} />}
       {!review && (
         <Alert
           tone="info"
@@ -294,7 +311,7 @@ export function InvoiceReview({
               existingSupplier
                 ? `Proveedor existente: ${existingSupplier.name}`
                 : supplierName
-                  ? "Proveedor nuevo: se crea al confirmar."
+                  ? `Proveedor nuevo: se crea al confirmar.${doubtful.has("proveedor_nombre") ? " Revisá el nombre: la lectura es dudosa." : ""}`
                   : undefined
             }
           >
@@ -322,7 +339,7 @@ export function InvoiceReview({
             <Input id="f-date" type="date" value={date} max={todayAR()} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Tipo" htmlFor="f-type">
+            <Field label="Tipo" htmlFor="f-type" hint={review && review.extraction.tipo_documento !== docType && docType === "otro" ? review.extraction.descripcion_comprobante ?? undefined : undefined}>
               <Select id="f-type" value={docType} onChange={(e) => setDocType(e.target.value)}>
                 <option value="">—</option>
                 {DOC_TYPES.map((t) => (
@@ -336,6 +353,9 @@ export function InvoiceReview({
               <Input id="f-num" value={docNumber} onChange={(e) => setDocNumber(e.target.value)} />
             </Field>
           </div>
+          <Field label="Notas" htmlFor="f-notes" optional className="sm:col-span-2" hint={review?.notes ? "Datos del comprobante que no tienen un campo propio (vencimiento, período…)." : undefined}>
+            <Textarea id="f-notes" rows={2} className="min-h-16" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} />
+          </Field>
         </CardBody>
       </Card>
 
@@ -390,7 +410,7 @@ export function InvoiceReview({
                       ) : (
                         <Badge tone="info">Producto nuevo o sin elegir</Badge>
                       )}
-                      {src?.confidence === "baja" && <Badge tone="warning">Lectura dudosa</Badge>}
+                      {src && (src.confidence === "baja" || [...doubtful].some((f) => f.startsWith(`lineas[${src.index}]`))) && <Badge tone="warning">Lectura dudosa</Badge>}
                       <button
                         type="button"
                         aria-label={`Quitar línea ${idx + 1}`}
@@ -509,7 +529,11 @@ export function InvoiceReview({
               </Field>
             </>
           )}
-          <Field label="Total del comprobante" error={mismatch ? `No coincide con la suma calculada (${formatARS(computedTotal)}). Revisá líneas e impuestos.` : undefined}>
+          <Field
+            label="Total del comprobante"
+            error={mismatch ? `No coincide con la suma calculada (${formatARS(computedTotal)}). Revisá líneas e impuestos.` : undefined}
+            hint={!mismatch && doubtful.has("total") ? "Revisá el total: la lectura es dudosa o no cierra con el resto." : undefined}
+          >
             <NumberInput value={total} onChange={(e) => setTotal(e.target.value)} placeholder={computedTotal !== null ? formatARS(computedTotal) : ""} />
           </Field>
         </CardBody>

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Database, Queryable } from "@/lib/db/types";
-import type { InvoiceExtraction } from "@/lib/invoices/schema";
+import { coerceExtraction, type InvoiceExtraction } from "@/lib/invoices/schema";
 import { type ActionContext, audit, withOperation } from "./context";
 import { DomainError, NotFoundError } from "./errors";
 import { uuid } from "./validation";
@@ -80,7 +80,8 @@ interface DocRow {
   id: string;
   number: number;
   status: DocumentStatus;
-  extraction: InvoiceExtraction | null;
+  /** JSON guardado: puede tener el formato de una versión anterior del lector. */
+  extraction: unknown;
   extraction_model: string | null;
   extraction_error: string | null;
   extracted_at: string | null;
@@ -128,7 +129,8 @@ function mapDoc(r: DocRow, files: DocumentFile[]): InvoiceDocument {
     id: r.id,
     number: r.number,
     status: r.status,
-    extraction: r.extraction,
+    // Se normaliza al leer: las lecturas guardadas con versiones anteriores siguen funcionando.
+    extraction: r.extraction ? coerceExtraction(typeof r.extraction === "string" ? JSON.parse(r.extraction) : r.extraction) : null,
     extractionModel: r.extraction_model,
     extractionError: r.extraction_error,
     extractedAt: r.extracted_at,

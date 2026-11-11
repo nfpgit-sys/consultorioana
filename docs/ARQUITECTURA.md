@@ -106,11 +106,15 @@ tarjeta "Confirmar" ──► misma acción de servidor que los formularios (con
 
 ## 6. Facturas
 
-1. Fotos (comprimidas en el navegador a JPEG ≤ 2000 px) o un PDF (≤ 4 MB por el límite de las funciones de Vercel).
+1. Fotos o un PDF (≤ 4 MB por el límite de las funciones de Vercel). Las imágenes chicas se suben tal cual; las fotos grandes se pasan a JPEG en el navegador respetando la orientación de la cámara, con la mayor resolución que entre en el límite (hasta 2600 px).
 2. Se guarda una copia privada y se calcula el hash (archivo repetido → aviso).
-3. La IA extrae los datos con **salida estructurada** (null cuando no se lee). Con Gemini (`gemini-flash-latest`), el esquema de salida se deriva del mismo esquema zod que después valida la respuesta; si no cumple el formato, se rechaza y se ofrece la carga manual. Con Claude se usa además el respaldo automático del servidor si el modelo declina. El texto del comprobante se trata como datos, no como instrucciones.
-4. Revisión: cada línea se compara con el catálogo (alias aprendidos del proveedor primero). Solo es "segura" con alias o nombre idéntico o un candidato muy superior; las dudosas exigen confirmación; las nuevas proponen crear el producto con detección de casi duplicados. Si la factura declara el contenido ("caja x100"), se usa esa equivalencia y se muestra la cuenta.
-5. Al confirmar se registra la compra (o el gasto general) y se aprenden los alias.
+3. **Lectura con IA** (`src/lib/invoices/extract.ts`). Las instrucciones son genéricas: no hay plantillas por emisor; el modelo ubica cada dato por su etiqueta y su contenido (emisor vs. receptor, tablas con columnas variables, renglones de varias líneas, fotos rotadas o de baja calidad). El esquema (`schema.ts`) cubre emisor y receptor (nombre, CUIT/DNI, domicilio, condición de IVA), tipo, letra y número, CAE, emisión, vencimiento y período, conceptos (código, cantidad, unidad, precio, descuento, alícuota, importe), detalle de impuestos, percepciones y retenciones, subtotal y total. Lo que no figura va en null; lo que figura pero no se lee con seguridad se anota en `campos_dudosos`. Nada se completa por suposición.
+   - **Plazo y reintentos**: todo ocurre en ≤ 100 s (la función tiene 120 s), para que siempre quede guardado el resultado o el error. Si el modelo principal está saturado, sin cupo, demora o corta la respuesta, se prueba con `IA_MODELO_FACTURAS_RESPALDO` (por defecto `gemini-flash-lite-latest`); si el servicio rechaza el esquema, se repite en modo JSON con la forma descripta en el texto. Máximo tres consultas; con la clave inválida o sin permiso no se reintenta. Cada consulta se cuenta en el uso de IA.
+   - **Normalización tolerante** (`coerceExtraction`): importes escritos como texto («$ 350.000,00»), fechas DD/MM/AAAA y valores desconocidos se interpretan o se marcan como dudosos, en lugar de descartar toda la lectura. Las lecturas guardadas con versiones anteriores se normalizan al abrirlas.
+   - Con Claude se usa además el respaldo automático del servidor si el modelo declina. El texto del comprobante se trata como datos, no como instrucciones.
+4. **Controles automáticos** (`validate.ts`), independientes del diseño de la factura: cantidad × precio − descuento = importe por línea; la suma de los conceptos contra el subtotal o el total; subtotal − descuentos + IVA + percepciones = total (admite IVA incluido y el «IVA contenido» informativo); detalle de impuestos contra los totales y contra base × alícuota; fecha de emisión no futura ni muy vieja; vencimiento posterior a la emisión; dígito verificador del CUIT; letra coherente con el IVA (A sin IVA, C con IVA); datos esenciales faltantes; varios comprobantes distintos en una misma subida. Lo que no cierra se muestra y se resalta para revisar; nunca se corrige solo.
+5. Revisión: se muestran todos los datos leídos (con los dudosos resaltados) y el resultado de los controles. Cada línea se compara con el catálogo (alias aprendidos del proveedor primero). Solo es "segura" con alias o nombre idéntico o un candidato muy superior; las dudosas exigen confirmación; las nuevas proponen crear el producto con detección de casi duplicados. Si la factura declara el contenido ("caja x100"), se usa esa equivalencia y se muestra la cuenta. Los datos sin campo propio (período, vencimiento, inmueble, CAE) se proponen como notas del gasto o la compra. Los tipos que la app no registra por separado (factura sin letra, E, nota de débito, liquidación) se cargan como «Otro comprobante».
+6. Al confirmar se registra la compra (o el gasto general) y se aprenden los alias. Si la lectura se interrumpió, el comprobante muestra el aviso y permite reintentar.
 
 ## 7. Proveedor de IA, costos y privacidad
 
@@ -120,8 +124,9 @@ tarjeta "Confirmar" ──► misma acción de servidor que los formularios (con
 |---|---|---|
 | Instrucción al asistente | `gemini-flash-lite-latest` | El de mayor cupo gratuito diario; alcanza para interpretar pedidos cortos con herramientas. |
 | Lectura de factura | `gemini-flash-latest` | Mejor lectura de imágenes y PDF; las facturas son menos frecuentes que las instrucciones. |
+| Respaldo de facturas | `gemini-flash-lite-latest` | Si el principal está saturado o sin cupo (tiene cupo propio). |
 
-Los alias `-latest` apuntan siempre al modelo vigente, así un retiro de versión no deja la app sin IA (Google avisa antes de cambiarlos). Si se prefiere fijar versiones, se usan `IA_MODELO_ASISTENTE` e `IA_MODELO_FACTURAS`.
+Los alias `-latest` apuntan siempre al modelo vigente, así un retiro de versión no deja la app sin IA (Google avisa antes de cambiarlos). Si se prefiere fijar versiones, se usan `IA_MODELO_ASISTENTE`, `IA_MODELO_FACTURAS` e `IA_MODELO_FACTURAS_RESPALDO` (este último acepta «ninguno» para no usar respaldo).
 
 **Plan gratuito de Gemini — lo que hay que saber:**
 

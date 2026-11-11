@@ -12,29 +12,54 @@ interface Picked {
   preview: string | null;
 }
 
-const MAX_SIDE = 2000;
+/** Límite del pedido en el servidor (4,3 MB) menos un margen para el resto del formulario. */
+const TOTAL_BUDGET = 3_900_000;
+/** Intentos de compresión: primero alta resolución (letra chica legible); si pesa mucho, se reduce. */
+const STEPS = [
+  { side: 2600, quality: 0.9 },
+  { side: 2600, quality: 0.82 },
+  { side: 2200, quality: 0.8 },
+  { side: 1800, quality: 0.78 },
+  { side: 1500, quality: 0.72 },
+];
 
-/** Comprime fotos en el navegador (JPEG, lado mayor 2000 px) para subir rápido y bajar costos. */
-async function compressImage(file: File): Promise<File> {
-  // Toda imagen (también GIF, que la IA no lee) se convierte a JPEG liviano antes de subirla.
+/** Formatos que el servidor y la IA aceptan directamente. */
+const PASSTHROUGH = ["image/jpeg", "image/png", "image/webp"];
+
+/**
+ * Prepara fotos en el navegador: respeta la orientación de la cámara, pasa a JPEG y ajusta
+ * resolución y calidad para que todas entren en el límite de subida sin perder legibilidad.
+ */
+async function compressImage(file: File, budget: number): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
   let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(file);
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
     throw new Error(`No se pudo leer la imagen «${file.name}». Probá sacar la foto en formato JPG.`);
   }
-  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  const ctx = canvas.getContext("2d")!;
-  // Fondo blanco: en JPEG las zonas transparentes (PNG/GIF) quedarían negras.
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  const blob: Blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No se pudo procesar la imagen."))), "image/jpeg", 0.85));
-  return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+  // Una imagen chica que ya entra en el límite se sube tal cual: volver a comprimirla solo pierde detalle.
+  if (PASSTHROUGH.includes(file.type) && file.size <= budget && Math.max(bitmap.width, bitmap.height) <= STEPS[0].side) {
+    bitmap.close();
+    return file;
+  }
+  // El resto (fotos grandes, GIF, HEIC…) se convierte a JPEG.
+  let blob: Blob | null = null;
+  for (const step of STEPS) {
+    const scale = Math.min(1, step.side / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const ctx = canvas.getContext("2d")!;
+    // Fondo blanco: en JPEG las zonas transparentes (PNG/GIF) quedarían negras.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No se pudo procesar la imagen."))), "image/jpeg", step.quality));
+    if (blob.size <= budget) break;
+  }
+  bitmap.close();
+  return new File([blob!], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
 }
 
 export function InvoiceUpload({ aiEnabled, privacyNote = null }: { aiEnabled: boolean; privacyNote?: string | null }) {
@@ -61,7 +86,10 @@ export function InvoiceUpload({ aiEnabled, privacyNote = null }: { aiEnabled: bo
     setError(null);
     try {
       setStage("procesando");
-      const files = await Promise.all(picked.map((p) => compressImage(p.file)));
+      const pdfBytes = picked.filter((p) => !p.file.type.startsWith("image/")).reduce((a, p) => a + p.file.size, 0);
+      const images = picked.filter((p) => p.file.type.startsWith("image/")).length;
+      const perImage = images ? Math.min(1_800_000, Math.max(250_000, (TOTAL_BUDGET - pdfBytes) / images)) : 0;
+      const files = await Promise.all(picked.map((p) => compressImage(p.file, perImage)));
       const form = new FormData();
       for (const f of files) form.append("archivos", f);
       setStage("subiendo");
@@ -139,7 +167,7 @@ export function InvoiceUpload({ aiEnabled, privacyNote = null }: { aiEnabled: bo
                 ? "Subiendo…"
                 : stage === "leyendo"
                   ? aiEnabled
-                    ? "Leyendo la factura con IA (puede tardar hasta un minuto)…"
+                    ? "Leyendo la factura con IA (suele tardar menos de un minuto)…"
                     : "Guardando…"
                   : aiEnabled
                     ? "Analizar factura"
