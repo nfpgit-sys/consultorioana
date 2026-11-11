@@ -1,5 +1,5 @@
 import type { Queryable } from "@/lib/db/types";
-import { isValidIsoDate, todayAR } from "@/lib/domain/format";
+import { formatDate, isValidIsoDate, todayAR } from "@/lib/domain/format";
 import { classifyInvoiceLine, type LineMatchStatus } from "@/lib/domain/matching";
 import { normalizeName } from "@/lib/domain/normalize";
 import { type BaseUnit, convertPhysical, normalizePresentationName, resolvePhysicalUnit, round3, UNIT_DEFS } from "@/lib/domain/units";
@@ -10,6 +10,7 @@ import { findSameFiles } from "@/lib/services/documents";
 import { normalizeDocNumber } from "@/lib/services/purchases";
 import { findSupplierExact, isValidCuit, normalizeCuit, suggestSuppliers } from "@/lib/services/suppliers";
 import type { InvoiceExtraction, InvoiceLine } from "./schema";
+import { formatPeriod, type InvoiceCheck, lineAmount, validateExtraction } from "./validate";
 
 export interface ReviewLine {
   index: number;
@@ -42,8 +43,11 @@ export interface ReviewModel {
   extraction: InvoiceExtraction;
   kind: "compra" | "gasto";
   supplier: { name: string | null; cuit: string | null; cuitValid: boolean; existingId: string | null; existingName: string | null; suggestions: { id: string; name: string }[] };
+  /** Fecha para registrar (null si falta o no se puede usar, por ejemplo si es posterior a hoy). */
   date: string | null;
   dateWarning: string | null;
+  /** Fecha de emisión tal como se leyó (aunque no sirva para registrar). */
+  issuedOn: string | null;
   docType: DocType | null;
   docNumber: string | null;
   duplicate: { kind: "compra" | "gasto"; number: number; id: string } | null;
@@ -52,6 +56,30 @@ export interface ReviewModel {
   totals: { subtotal: number | null; iva: number | null; otherTaxes: number | null; discounts: number | null; total: number | null; pricesIncludeTax: boolean | null };
   sumLines: number | null;
   currencyWarning: string | null;
+  /** Controles automáticos de consistencia (importes, fechas, CUIT, datos faltantes). */
+  checks: InvoiceCheck[];
+  /** Campos para revisar a mano (rutas como "total" o "lineas[2].importe"). */
+  doubtful: string[];
+  /** Resumen para notas del gasto o la compra: vencimiento, período, inmueble/cliente. */
+  notes: string | null;
+}
+
+/** Tipos que la app registra; los demás (factura sin letra, E, nota de débito, liquidación…) van como «otro». */
+function registrableDocType(kind: InvoiceExtraction["tipo_documento"]): DocType | null {
+  if ((DOC_TYPES as readonly string[]).includes(kind)) return kind as DocType;
+  return "otro";
+}
+
+function buildNotes(ex: InvoiceExtraction): string | null {
+  const parts = [
+    ex.descripcion_comprobante,
+    ex.periodo ? `Período ${formatPeriod(ex.periodo)}` : null,
+    ex.fecha_vencimiento && isValidIsoDate(ex.fecha_vencimiento) ? `Vence ${formatDate(ex.fecha_vencimiento)}` : null,
+    // En servicios y alquileres el domicilio facturado identifica el inmueble o la conexión.
+    !ex.es_compra_de_insumos && ex.receptor_domicilio ? `Domicilio: ${ex.receptor_domicilio}` : null,
+    ex.cae ? `CAE ${ex.cae}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ").slice(0, 500) : null;
 }
 
 function titleCase(s: string): string {
@@ -170,7 +198,7 @@ export async function buildReview(q: Queryable, doc: InvoiceDocument): Promise<R
     };
   });
 
-  const docType = (DOC_TYPES as readonly string[]).includes(ex.tipo_documento) ? (ex.tipo_documento as DocType) : null;
+  const docType = registrableDocType(ex.tipo_documento);
   const docNumber = normalizeDocNumber(ex.numero);
   let duplicate: ReviewModel["duplicate"] = null;
   if (existing && docNumber) {
@@ -186,15 +214,19 @@ export async function buildReview(q: Queryable, doc: InvoiceDocument): Promise<R
     if (!duplicate && e) duplicate = { kind: "gasto", number: e.number, id: e.id };
   }
 
-  let date = ex.fecha && isValidIsoDate(ex.fecha) ? ex.fecha : null;
+  const today = todayAR();
+  const issuedOn = ex.fecha && isValidIsoDate(ex.fecha) ? ex.fecha : null;
+  let date = issuedOn;
   let dateWarning: string | null = null;
-  if (ex.fecha && !date) dateWarning = `No se pudo interpretar la fecha «${ex.fecha}». Revisala.`;
-  if (date && date > todayAR()) {
-    dateWarning = "La fecha leída es posterior a hoy: revisala (puede ser un error de lectura).";
+  if (ex.fecha && !issuedOn) dateWarning = `No se pudo interpretar la fecha «${ex.fecha}». Revisala.`;
+  if (date && date > today) {
+    // No se registran gastos ni compras con fecha futura: la persona elige la fecha (por ejemplo, la del pago).
+    dateWarning = `La fecha de emisión leída (${formatDate(date)}) es posterior a hoy. Revisala o usá la fecha en que lo pagás.`;
     date = null;
   }
-  const amounts = ex.lineas.map((l) => l.importe ?? (l.precio_unitario !== null && l.cantidad !== null ? l.precio_unitario * l.cantidad : null));
+  const amounts = ex.lineas.map(lineAmount);
   const sumLines = amounts.every((a) => a !== null) && amounts.length ? Math.round(amounts.reduce<number>((a, b) => a + (b ?? 0), 0) * 100) / 100 : null;
+  const validation = validateExtraction(ex, today);
 
   return {
     extraction: ex,
@@ -209,6 +241,7 @@ export async function buildReview(q: Queryable, doc: InvoiceDocument): Promise<R
     },
     date,
     dateWarning,
+    issuedOn,
     docType,
     docNumber,
     duplicate,
@@ -223,6 +256,9 @@ export async function buildReview(q: Queryable, doc: InvoiceDocument): Promise<R
       pricesIncludeTax: ex.precios_incluyen_iva,
     },
     sumLines,
+    checks: validation.checks,
+    doubtful: validation.doubtful,
+    notes: buildNotes(ex),
     currencyWarning: ex.moneda && !/^(ars|\$|pesos?)$/i.test(ex.moneda.trim()) ? `El comprobante parece estar en ${ex.moneda}. La aplicación registra importes en pesos (ARS): convertilos antes de confirmar.` : null,
   };
 }

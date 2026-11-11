@@ -31,11 +31,13 @@ export default async function FacturaPage({ params }: { params: Promise<{ id: st
       listCategories(db),
       listExpenseCategories(db),
     ]);
-    return { doc, review, sameFile, products, suppliers, categories, expenseCategories };
+    // Si la lectura se interrumpió (por ejemplo, la plataforma cortó la función), el comprobante queda «pendiente».
+    const interrupted = doc.status === "pendiente" && Date.now() - new Date(doc.createdAt).getTime() > 150_000;
+    return { doc, review, sameFile, products, suppliers, categories, expenseCategories, interrupted };
   });
   if (!loaded.ok) return <SystemErrorCard error={loaded.error} />;
   if (!loaded.data) notFound();
-  const { doc, review, sameFile, products, suppliers, categories, expenseCategories } = loaded.data;
+  const { doc, review, sameFile, products, suppliers, categories, expenseCategories, interrupted } = loaded.data;
   const ai = getAiConfig();
   const stored = doc.files.filter((f) => f.storage !== "none");
 
@@ -99,6 +101,11 @@ export default async function FacturaPage({ params }: { params: Promise<{ id: st
               {doc.status === "error" && (
                 <Alert tone="warning" className="mb-4" title="No se pudo leer automáticamente">
                   {doc.extractionError}
+                </Alert>
+              )}
+              {interrupted && ai.enabled && (
+                <Alert tone="warning" className="mb-4" title="La lectura automática no terminó">
+                  Se interrumpió antes de guardar el resultado. Podés reintentarla o cargar los datos a mano.
                 </Alert>
               )}
               <InvoiceReview

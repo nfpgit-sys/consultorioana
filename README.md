@@ -14,7 +14,7 @@ Aplicación web para gestionar el **inventario, los consumos, las compras y los 
 | Movimientos | Consumos, ingresos, ajustes por conteo, reversiones. Historial inmutable con producto, cantidad, tipo, fecha y hora, motivo, origen (manual, texto, voz, factura) y quién lo registró. Stock nunca negativo. |
 | Asistente | «Hoy gasté 3 jeringas», «Compramos 5 tubos de pasta», «¿Cuántos guantes quedan?», «¿Qué productos están por agotarse?», «Mostrame cuánto gastamos este mes». Tarjetas de confirmación, advertencias de duplicado, confirmación reforzada para operaciones sensibles y «Deshacer». Dictado por voz (es-AR). Modo básico sin IA si no hay clave o si se agota el cupo gratuito. |
 | Compras y gastos | Compras con varias líneas, proveedor, IVA y percepciones; compras pendientes de precio; anulación con reversión de stock. Gastos generales por categoría. Detección de comprobantes duplicados. |
-| Facturas | Foto o PDF → extracción con IA → relación con el catálogo (seguras, dudosas, nuevas) → vista previa editable → confirmación. Alias aprendidos por proveedor. Sin IA: carga manual con el comprobante a la vista. |
+| Facturas | Foto, escaneo o PDF de cualquier formato (insumos, servicios, alquileres, tickets…) → extracción con IA de emisor, cliente, fechas, conceptos, impuestos y totales, sin plantillas → controles automáticos (que los importes cierren, fechas, CUIT) con los datos dudosos resaltados → relación con el catálogo → vista previa editable → confirmación. Alias aprendidos por proveedor. Sin IA: carga manual con el comprobante a la vista. |
 | Lotes y vencimientos | Por producto (opcional). Consumo automático del lote que vence primero, alertas a 60/30 días y baja por vencimiento. |
 | Panel y reportes | Indicadores, alertas, consumos del mes, evolución de gastos (6 meses), reportes por período / categoría / producto, exportación a Excel (.xlsx). |
 | Respaldos | Descarga de respaldo completo (JSON) y restauración transaccional; recordatorio semanal. |
@@ -48,6 +48,7 @@ Todas las variables están documentadas en [`.env.example`](.env.example).
 | `ANTHROPIC_API_KEY`, `IA_PROVEEDOR` | Opcional | Alternativa con Claude (Anthropic). Si hay clave de Gemini se usa Gemini, salvo `IA_PROVEEDOR=claude`. |
 | `BLOB_READ_WRITE_TOKEN` | Opcional | Guarda una copia privada de cada factura (Vercel Blob). |
 | `IA_MODELO_ASISTENTE`, `IA_MODELO_FACTURAS` | Opcional | Cambian los modelos. Con Gemini, por defecto `gemini-flash-lite-latest` y `gemini-flash-latest` (alias que Google actualiza solo); con Claude, `claude-haiku-5-5` y `claude-opus-5-5`. |
+| `IA_MODELO_FACTURAS_RESPALDO` | Opcional | Modelo que se usa si el de facturas está saturado o sin cupo. Con Gemini, por defecto `gemini-flash-lite-latest`; `ninguno` lo desactiva. |
 
 Si falta algo, la aplicación **no se bloquea**: muestra el problema en la sección afectada y en **Ajustes → Estado del sistema**. La única excepción deliberada es la clave de acceso: sin ella, la versión publicada no deja entrar (para no exponer datos).
 

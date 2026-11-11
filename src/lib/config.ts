@@ -41,6 +41,8 @@ export type AiConfig =
       keyVar: string;
       assistantModel: string;
       invoiceModel: string;
+      /** Modelo alternativo para facturas si el principal está saturado, sin cupo o falla (null: sin respaldo). */
+      invoiceFallbackModel: string | null;
       /** Aviso de privacidad para mostrar junto a los lugares donde se envían datos a la IA. */
       privacyNote: string | null;
     }
@@ -48,13 +50,14 @@ export type AiConfig =
 
 /**
  * Modelos por defecto de cada proveedor: uno rápido y económico para las instrucciones
- * del asistente y uno más capaz para leer facturas. Se cambian con IA_MODELO_ASISTENTE e
- * IA_MODELO_FACTURAS. En Gemini se usan los alias "-latest", que Google actualiza solo
+ * del asistente y uno más capaz para leer facturas (con un respaldo si ese está saturado).
+ * Se cambian con IA_MODELO_ASISTENTE, IA_MODELO_FACTURAS e IA_MODELO_FACTURAS_RESPALDO. En Gemini se usan los alias "-latest", que Google actualiza solo
  * cuando retira un modelo (así la app no deja de funcionar por un cambio de versión).
  */
-export const AI_DEFAULTS: Record<AiProvider, { name: string; assistantModel: string; invoiceModel: string }> = {
-  gemini: { name: "Gemini (Google)", assistantModel: "gemini-flash-lite-latest", invoiceModel: "gemini-flash-latest" },
-  anthropic: { name: "Claude (Anthropic)", assistantModel: "claude-haiku-5-5", invoiceModel: "claude-opus-5-5" },
+export const AI_DEFAULTS: Record<AiProvider, { name: string; assistantModel: string; invoiceModel: string; invoiceFallbackModel: string | null }> = {
+  gemini: { name: "Gemini (Google)", assistantModel: "gemini-flash-lite-latest", invoiceModel: "gemini-flash-latest", invoiceFallbackModel: "gemini-flash-lite-latest" },
+  // Claude ya tiene respaldo del lado del servidor (server-side fallback).
+  anthropic: { name: "Claude (Anthropic)", assistantModel: "claude-haiku-5-5", invoiceModel: "claude-opus-5-5", invoiceFallbackModel: null },
 };
 
 export const GEMINI_PRIVACY_NOTE =
@@ -65,6 +68,13 @@ export function geminiKeyVar(): "GEMINI_API_KEY" | "GOOGLE_API_KEY" | null {
   if (process.env.GEMINI_API_KEY?.trim()) return "GEMINI_API_KEY";
   if (process.env.GOOGLE_API_KEY?.trim()) return "GOOGLE_API_KEY";
   return null;
+}
+
+/** IA_MODELO_FACTURAS_RESPALDO: otro modelo, o «ninguno» para no usar respaldo. */
+function fallbackModel(raw: string | undefined, def: string | null): string | null {
+  const v = raw?.trim();
+  if (!v) return def;
+  return /^(ninguno|no|none|off)$/i.test(v) ? null : v;
 }
 
 export function getAiConfig(): AiConfig {
@@ -103,6 +113,7 @@ export function getAiConfig(): AiConfig {
     keyVar: provider === "gemini" ? (gemini as string) : "ANTHROPIC_API_KEY",
     assistantModel: process.env.IA_MODELO_ASISTENTE?.trim() || defaults.assistantModel,
     invoiceModel: process.env.IA_MODELO_FACTURAS?.trim() || defaults.invoiceModel,
+    invoiceFallbackModel: fallbackModel(process.env.IA_MODELO_FACTURAS_RESPALDO, defaults.invoiceFallbackModel),
     privacyNote: provider === "gemini" ? GEMINI_PRIVACY_NOTE : null,
   };
 }

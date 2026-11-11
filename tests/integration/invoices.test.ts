@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "@/lib/db/types";
 import { buildReview } from "@/lib/invoices/review";
-import type { InvoiceExtraction } from "@/lib/invoices/schema";
+import { coerceExtraction, type InvoiceExtraction } from "@/lib/invoices/schema";
 import { createDocument, getDocument, saveExtraction } from "@/lib/services/documents";
 import { addPresentation, createProduct, getProduct } from "@/lib/services/products";
 import { createPurchase } from "@/lib/services/purchases";
@@ -13,7 +13,8 @@ let db: Database;
 let jeringa: string;
 let guantes: string;
 
-const extraction = (overrides: Partial<InvoiceExtraction> = {}): InvoiceExtraction => ({
+const extraction = (overrides: Record<string, unknown> = {}): InvoiceExtraction =>
+  coerceExtraction({
   tipo_documento: "factura_a",
   es_compra_de_insumos: true,
   categoria_gasto_sugerida: null,
@@ -72,7 +73,7 @@ const extraction = (overrides: Partial<InvoiceExtraction> = {}): InvoiceExtracti
   legibilidad: "buena",
   observaciones: null,
   ...overrides,
-});
+  });
 
 async function newDoc(ex: InvoiceExtraction) {
   const id = randomUUID();
@@ -165,8 +166,99 @@ describe("revisión de facturas", () => {
     const review = (await buildReview(db, doc))!;
     expect(review.kind).toBe("gasto");
     expect(review.date).toBeNull();
+    expect(review.issuedOn).toBe("2999-01-01");
     expect(review.dateWarning).toContain("posterior a hoy");
     expect(review.currencyWarning).toContain("USD");
+  });
+});
+
+/**
+ * Las tres facturas de alquiler que no se pudieron procesar, tal como las estructura el lector
+ * (formato sin letra, sin CUIT del emisor, tres conceptos, período y vencimiento).
+ */
+const RENTALS = [
+  { emisor: "Grupo Inmobiliario Rivadavia", numero: "0002-001273", fecha: "2026-11-03", vence: "2026-11-10", periodo: "2026-11", cliente: "María González", dni: "38765432", inmueble: "Alsina 567, Bahía Blanca", conceptos: [["Alquiler mensual", 350000], ["Expensas", 70000], ["Servicios (luz)", 22300]], total: 442300 },
+  { emisor: "Inmobiliaria del Sur", numero: "0001-004782", fecha: "2026-10-15", vence: "2026-10-20", periodo: "2026-10", cliente: "Juan Pérez", dni: "42345678", inmueble: "Av. Colón 1234, Mar del Plata", conceptos: [["Alquiler mensual", 420000], ["Expensas", 85000], ["Servicios (agua)", 12500]], total: 517500 },
+  { emisor: "RentAR Soluciones Inmobiliarias", numero: "0003-007612", fecha: "2026-11-28", vence: "2026-12-05", periodo: "2026-11", cliente: "Diego Fernández", dni: "45678901", inmueble: "Bv. Illia 987, Córdoba", conceptos: [["Alquiler mensual", 380000], ["Expensas", 75000], ["Servicios (gas)", 18750]], total: 473750 },
+] as const;
+
+const rentalExtraction = (r: (typeof RENTALS)[number]) =>
+  coerceExtraction({
+    tipo_documento: "factura",
+    descripcion_comprobante: "Factura de alquiler",
+    numero: r.numero,
+    fecha: r.fecha,
+    fecha_vencimiento: r.vence,
+    periodo: r.periodo,
+    proveedor_nombre: r.emisor,
+    proveedor_cuit: null,
+    receptor_nombre: r.cliente,
+    receptor_documento: r.dni,
+    receptor_domicilio: r.inmueble,
+    es_compra_de_insumos: false,
+    categoria_gasto_sugerida: "Alquiler",
+    lineas: r.conceptos.map(([descripcion, importe]) => ({ descripcion, tipo_linea: "servicio", cantidad: null, precio_unitario: null, importe, confianza: "alta" })),
+    total: r.total,
+    precios_incluyen_iva: true,
+    legibilidad: "buena",
+  });
+
+describe("facturas de alquiler (formato sin letra ni CUIT)", () => {
+  it.each(RENTALS.map((r) => [r.emisor, r] as const))("%s: se revisa como gasto con todos los datos y controles", async (_name, r) => {
+    const doc = await newDoc(rentalExtraction(r));
+    const review = (await buildReview(db, doc))!;
+    expect(review.kind).toBe("gasto");
+    expect(review.docType).toBe("otro"); // la app registra «factura sin letra» como otro comprobante
+    expect(review.docNumber).toBeTruthy();
+    expect(review.sumLines).toBe(r.total);
+    expect(review.totals.total).toBe(r.total);
+    expect(review.supplier).toMatchObject({ name: r.emisor, cuit: null, cuitValid: true });
+    expect(review.issuedOn).toBe(r.fecha);
+    expect(review.notes).toContain("Factura de alquiler");
+    expect(review.notes).toContain(`Período ${r.periodo.slice(5)}/${r.periodo.slice(0, 4)}`);
+    expect(review.notes).toContain("Vence");
+    expect(review.notes).toContain(r.inmueble);
+    expect(review.checks).toContainEqual(expect.objectContaining({ level: "ok", message: expect.stringContaining("coincide con el total") }));
+    expect(review.checks.filter((c) => c.level === "error")).toEqual([]);
+    if (r.fecha > todayAR()) {
+      // Emisión futura (28/11 cuando hoy es antes): se muestra, se avisa y no se usa para registrar.
+      expect(review.date).toBeNull();
+      expect(review.dateWarning).toContain("posterior a hoy");
+      expect(review.doubtful).toContain("fecha");
+    } else {
+      expect(review.date).toBe(r.fecha);
+    }
+  });
+});
+
+describe("compatibilidad con lecturas guardadas por la versión anterior", () => {
+  it("un comprobante analizado antes de este cambio se sigue pudiendo revisar", async () => {
+    const id = randomUUID();
+    await createDocument(db, [{ fileName: "viejo.jpg", mimeType: "image/jpeg", sizeBytes: 10, sha256: randomUUID(), storage: "none", storageKey: null }], { source: "factura" }, id);
+    const v1 = {
+      tipo_documento: "factura_b",
+      es_compra_de_insumos: true,
+      categoria_gasto_sugerida: null,
+      proveedor_nombre: "Proveedor Viejo",
+      proveedor_cuit: null,
+      fecha: todayAR(),
+      numero: "0001-00000001",
+      moneda: "ARS",
+      lineas: [{ descripcion: "HILO DENTAL", nombre_normalizado: "Hilo dental", cantidad: 2, unidad: "unidad", contenido_por_unidad: null, unidad_contenido: null, precio_unitario: 1500, importe: 3000, lote: null, vencimiento: null, confianza: "alta" }],
+      subtotal: null,
+      iva: null,
+      otros_impuestos: null,
+      descuentos: null,
+      total: 3000,
+      precios_incluyen_iva: true,
+      legibilidad: "buena",
+      observaciones: null,
+    };
+    await db.query("update documents set status = 'analizado', extraction = $2::jsonb, extraction_model = 'viejo' where id = $1", [id, JSON.stringify(v1)]);
+    const review = (await buildReview(db, (await getDocument(db, id))!))!;
+    expect(review.lines[0]).toMatchObject({ description: "HILO DENTAL", lineTotal: 3000 });
+    expect(review.extraction).toMatchObject({ impuestos: [], campos_dudosos: [], letra: "B" });
+    expect(review.checks).toContainEqual(expect.objectContaining({ level: "ok" }));
   });
 });
 
