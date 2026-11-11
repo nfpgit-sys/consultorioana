@@ -99,6 +99,20 @@ export type InvoiceTax = z.infer<typeof InvoiceTaxSchema>;
 
 type Raw = Record<string, unknown>;
 
+/**
+ * El título del comprobante decide el tipo: si dice «Factura» (y no es un tique, una nota ni un
+ * «factura/recibo» combinado), es una factura aunque le falten datos fiscales y el modelo la haya
+ * clasificado como recibo u otro. Usa la letra leída si la hay.
+ */
+export function kindFromTitle(kind: (typeof INVOICE_DOC_KINDS)[number], title: string | null, letter: string | null): (typeof INVOICE_DOC_KINDS)[number] {
+  if (!title || kind.startsWith("factura")) return kind;
+  const t = title.toLowerCase();
+  if (!/\bfactura\b/.test(t) || /\b(recibo|nota|tique|ticket|remito|presupuesto)\b/.test(t)) return kind;
+  if (!["recibo", "otro", "liquidacion"].includes(kind)) return kind;
+  const fromLetter = letter && /^[ABCME]$/.test(letter) ? (`factura_${letter.toLowerCase()}` as (typeof INVOICE_DOC_KINDS)[number]) : null;
+  return fromLetter ?? "factura";
+}
+
 /** Acepta AAAA-MM-DD y también DD/MM/AAAA o DD-MM-AA (formato argentino). Devuelve null si no es una fecha real. */
 export function toIsoDate(input: string): string | null {
   const s = input.trim();
@@ -204,11 +218,13 @@ export function coerceExtraction(input: unknown): InvoiceExtraction {
     })
     .filter((t) => t.importe !== null || t.descripcion);
 
-  const tipo = oneOf(raw.tipo_documento, INVOICE_DOC_KINDS, "otro", "tipo_documento");
+  const title = str(raw.descripcion_comprobante);
+  const letter = str(raw.letra)?.toUpperCase().slice(0, 1) ?? null;
+  const tipo = kindFromTitle(oneOf(raw.tipo_documento, INVOICE_DOC_KINDS, "otro", "tipo_documento"), title, letter);
   const result: InvoiceExtraction = {
     tipo_documento: tipo,
-    letra: str(raw.letra)?.toUpperCase().slice(0, 1) ?? (/^factura_([abcme])$/.exec(tipo)?.[1].toUpperCase() ?? null),
-    descripcion_comprobante: str(raw.descripcion_comprobante),
+    letra: letter ?? (/^factura_([abcme])$/.exec(tipo)?.[1].toUpperCase() ?? null),
+    descripcion_comprobante: title,
     numero: str(raw.numero),
     fecha: date(raw.fecha, "fecha"),
     fecha_vencimiento: date(raw.fecha_vencimiento, "fecha_vencimiento"),

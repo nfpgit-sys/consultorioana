@@ -123,6 +123,15 @@ describe("normalización tolerante de la lectura", () => {
     expect(validateExtraction(ex, TODAY).status).toBe("ok");
   });
 
+  it("el título decide el tipo: «Factura de alquiler» leída como recibo pasa a factura; los títulos combinados no se tocan", () => {
+    expect(coerceExtraction({ tipo_documento: "recibo", descripcion_comprobante: "FACTURA DE ALQUILER" }).tipo_documento).toBe("factura");
+    expect(coerceExtraction({ tipo_documento: "otro", descripcion_comprobante: "Factura", letra: "c" })).toMatchObject({ tipo_documento: "factura_c", letra: "C" });
+    expect(coerceExtraction({ tipo_documento: "recibo", descripcion_comprobante: "Factura / Recibo" }).tipo_documento).toBe("recibo");
+    expect(coerceExtraction({ tipo_documento: "ticket", descripcion_comprobante: "Tique factura B" }).tipo_documento).toBe("ticket");
+    expect(coerceExtraction({ tipo_documento: "nota_credito", descripcion_comprobante: "Nota de crédito (factura 0001-22)" }).tipo_documento).toBe("nota_credito");
+    expect(coerceExtraction({ tipo_documento: "recibo", descripcion_comprobante: "Recibo de pago" }).tipo_documento).toBe("recibo");
+  });
+
   it("toIsoDate rechaza fechas imposibles", () => {
     expect(toIsoDate("31/02/2026")).toBeNull();
     expect(toIsoDate("2026-13-01")).toBeNull();
@@ -209,8 +218,9 @@ describe("controles de consistencia", () => {
     expect(messages).toContain("con mucha dificultad");
   });
 
-  it("el título manda sobre el tipo: «Factura de alquiler» clasificada como recibo se marca para revisar", () => {
-    const v = validateExtraction(rentalInvoice({ tipo_documento: "recibo" }), TODAY);
+  it("control de título vs. tipo", () => {
+    // Si el tipo quedara distinto del título (por ejemplo, una extracción armada a mano), el control lo marca.
+    const v = validateExtraction({ ...rentalInvoice(), tipo_documento: "recibo" }, TODAY);
     expect(v.checks).toContainEqual(expect.objectContaining({ level: "aviso", message: expect.stringContaining("se clasificó como recibo") }));
     expect(v.doubtful).toContain("tipo_documento");
     expect(levels(rentalInvoice()).join(" ")).not.toContain("se clasificó");
