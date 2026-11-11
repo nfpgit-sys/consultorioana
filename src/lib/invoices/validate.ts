@@ -69,6 +69,21 @@ export function validateExtraction(ex: InvoiceExtraction, today: string): Invoic
     if (!ok) add("aviso", `El documento del cliente (${d}) no parece un CUIT o DNI válido.`, ["receptor_documento"]);
   }
   if (!ex.numero && ex.tipo_documento !== "ticket" && ex.tipo_documento !== "otro") add("aviso", "No se encontró el número del comprobante.", ["numero"]);
+  const title = ex.descripcion_comprobante?.toLowerCase() ?? "";
+  const titleKind = /\bnota de cr[eé]dito\b/.test(title)
+    ? "nota_credito"
+    : /\bnota de d[eé]bito\b/.test(title)
+      ? "nota_debito"
+      : /\bfactura\b/.test(title)
+        ? "factura"
+        : /\brecibo\b/.test(title)
+          ? "recibo"
+          : /\bremito\b/.test(title)
+            ? "remito"
+            : null;
+  if (titleKind && !ex.tipo_documento.startsWith(titleKind)) {
+    add("aviso", `El título dice «${ex.descripcion_comprobante}», pero se clasificó como ${ex.tipo_documento.replace("_", " ")}: revisá el tipo de comprobante.`, ["tipo_documento"]);
+  }
   if (ex.letra && /^factura_[abcme]$/.test(ex.tipo_documento) && ex.tipo_documento.slice(-1).toUpperCase() !== ex.letra) {
     add("aviso", `La letra leída (${ex.letra}) no coincide con el tipo de factura.`, ["letra", "tipo_documento"]);
   }

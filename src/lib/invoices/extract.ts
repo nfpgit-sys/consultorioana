@@ -39,9 +39,9 @@ QUIÉN ES QUIÉN
 - Receptor (campos receptor_*): a quien se le factura («Señor/es», «Cliente», «Razón social», «Inquilino», «Titular», «Facturado a»). No mezcles sus datos con los del emisor: si el emisor no muestra CUIT, dejá proveedor_cuit en null aunque el receptor tenga uno.
 
 TIPO, NÚMERO Y FECHAS
-- tipo_documento según lo que dice el comprobante y su letra (recuadro con A, B, C, M o E; «Cód. 01» = A, «Cód. 06» = B, «Cód. 11» = C). Si dice factura pero no se ve ninguna letra: «factura».
+- tipo_documento lo decide el TÍTULO del comprobante, no su apariencia ni los datos que le falten: si el título dice «Factura», es factura aunque no tenga CUIT, CAE ni IVA (eso va en observaciones); «recibo» solo si el título dice recibo. Usá la letra del recuadro (A, B, C, M o E; «Cód. 01» = A, «Cód. 06» = B, «Cód. 11» = C) y, si no se ve ninguna letra, «factura».
 - descripcion_comprobante: el título tal cual figura («Factura de alquiler», «Recibo X», «Liquidación de expensas»).
-- numero: punto de venta y número tal como figuran (ej.: 0002-00012345). cae: el CAE o CAI si figura.
+- numero: punto de venta y número copiados carácter por carácter, sin agregar ni quitar ceros (ej.: «0002-001273» se escribe 0002-001273). cae: el CAE o CAI si figura.
 - fecha = emisión. fecha_vencimiento = vencimiento del pago (si hay varios, el primero). periodo = período facturado o «mes de» (AAAA-MM; si es un rango, AAAA-MM-DD/AAAA-MM-DD).
 - Fechas en AAAA-MM-DD. Los comprobantes argentinos escriben DD/MM/AAAA: 03/11/2026 es el 3 de noviembre de 2026.
 
